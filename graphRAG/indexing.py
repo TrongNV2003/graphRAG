@@ -104,6 +104,3 @@ if __name__ == "__main__":
         save_graph_dir=args.save_graph_dir,
         graph_data=args.graph_data,
     )
-
-
-# export PYTHONPATH=$PYTHONPATH:/home/trongnv130/Desktop/graphRAG

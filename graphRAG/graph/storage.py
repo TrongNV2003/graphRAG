@@ -21,6 +21,7 @@ class GraphStorage:
             sanitized_type = self._standard_label(node["type"])
             sanitized_id = self._stardard_property(node["id"])
             
+            # (n:PERSON {id: "Elizabeth I"})
             query = f"""
             MERGE (n:{sanitized_type} {{id: $id}})
             SET n.name = $id

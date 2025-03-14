@@ -56,5 +56,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     response = extractor.answering_graph(query=args.query)
-    
-    pprint(response)
+    print(f"Query: {args.query}")
+    print(response)
