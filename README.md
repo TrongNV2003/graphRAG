@@ -22,17 +22,17 @@ GraphRAG implements a Retrieval-Augmented Generation (RAG) system using knowledg
 2. **Execution**:
     - **Indexing**
     ```sh
-    bash scripts/indexing.py
+    bash scripts/indexing.sh
     ```
 
     - **Querying**
     ```sh
-    bash scripts/querying.py
+    bash scripts/querying.sh
     ```
 
     - **Visualizing**
     ```sh
-    bash scripts/visualizing.py
+    bash scripts/visualizing.sh
     ```
 
 3. **Note**:
