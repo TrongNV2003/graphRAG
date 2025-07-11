@@ -1,0 +1,77 @@
+from loguru import logger
+from langchain_neo4j import Neo4jGraph
+from sentence_transformers import SentenceTransformer
+
+from graphRAG.config.setting import model_config
+
+class GraphStorage:
+    def __init__(self, url: str, username: str, password: str):
+        self.graph = Neo4jGraph(url=url, username=username, password=password)
+        self.embedder = SentenceTransformer(model_config.embedder_model)
+
+    def _standard_label(self, label: str) -> str:
+        return label.replace(" ", "_").replace("-", "_").upper()
+    
+    def _standard_property(self, value: str) -> str:
+        """Chuẩn hóa dấu nháy đơn"""
+        return value.replace("'", "\\'")
+
+    def _get_embedding(self, node: dict) -> list:
+        """Tạo embedding cho node dựa trên id và role."""
+        text = f"{node.get('id', '')} {node.get('role', '')}".strip()
+        return self.embedder.encode(text).tolist()
+
+    def store(self, graph_data, clear_old_graph=False):
+        # Xóa đồ thị cũ
+        if clear_old_graph:
+            self.graph.query("MATCH (n) DETACH DELETE n")
+
+        # Add nodes
+        for node in graph_data["nodes"]:
+            sanitized_type = self._standard_label(node["type"])
+            sanitized_id = self._standard_property(node["id"])
+            sanitized_alias = self._standard_property(node.get("alias", ""))
+            embedding = self._get_embedding(node)
+            
+            # (n:PERSON {id: "Elizabeth I"})
+            query = f"""
+            MERGE (n:{sanitized_type} {{id: $id}})
+            SET n.name = $id, n.role = $role, n.embedding = $embedding
+            """
+
+            try:
+                self.graph.query(query, params={
+                    "id": sanitized_id,
+                    "role": sanitized_alias,
+                    "embedding": embedding
+                })
+            except Exception as e:
+                logger.error(f"Error storing node {sanitized_id}: {str(e)}")
+
+        # Add relationships
+        valid_relationships = 0
+        for rel in graph_data["relationships"]:
+            if not all(key in rel for key in ["source", "target", "type"]):
+                logger.warning(f"Skipping invalid relationship with missing keys: {rel}")
+                continue
+            
+            sanitized_rel_type = self._standard_label(rel["type"])
+            sanitized_source = self._standard_property(rel["source"])
+            sanitized_target = self._standard_property(rel["target"])
+            
+            query = f"""
+            MATCH (source {{id: $source_id}})
+            MATCH (target {{id: $target_id}})
+            MERGE (source)-[r:`{sanitized_rel_type}`]->(target)
+            """
+            
+            try:
+                self.graph.query(query, params={
+                    "source_id": sanitized_source,
+                    "target_id": sanitized_target
+                })
+                valid_relationships += 1
+            except Exception as e:
+                logger.error(f"Failed to store relationship {sanitized_source} -> {sanitized_target}: {str(e)}")
+
+        logger.info(f"Stored {len(graph_data['nodes'])} nodes and {valid_relationships} relationships")

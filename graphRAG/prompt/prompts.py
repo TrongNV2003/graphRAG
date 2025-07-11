@@ -6,9 +6,11 @@ EXTRACT_PROMPT = (
     "\n"
     "### Instruction: \n"
     "- Analyze the following text and extract entities (people, places, events...) and relationships between them.\n"
+    "- For each entity, include an 'id' (the entity name), 'type' (e.g., Person, Place, Event, Organization), and 'role' (the role or function, e.g., 'Queen of England').\n"
+    "- If no role is applicable, leave them as empty strings ('').\n"
     "- Output returned in JSON format is as follows, remember output return stays in <output> tag:\n"
     "<output>\n"
-    '{{"nodes": [{{"id": "entity_name", "type": "entity_type"}}],\n'
+    '{{"nodes": [{{"id": "entity_name", "type": "entity_type", "role": "entity_role"}}],\n'
     '"relationships": [{{"source": "entity_1", "target": "entity_2", "type": "relationship_type"}}]}}\n'
     "</output>"
     "\n\n"

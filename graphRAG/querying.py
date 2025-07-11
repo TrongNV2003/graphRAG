@@ -3,7 +3,7 @@ from openai import OpenAI
 from typing import Optional
 
 from graphRAG.utils.utils import parse_json
-from graphRAG.graph.retrival import GraphRetriever
+from graphRAG.services.retrival import GraphRetriever
 from graphRAG.config.setting import llm_config, neo4j_config
 from graphRAG.prompt.prompts import ANSWERING_SYSTEM_PROMPT, ANSWERING_PROMPT
 
@@ -49,12 +49,12 @@ class GraphQuerying:
     
 if __name__ == "__main__":
     from pprint import pprint
-    extractor = GraphQuerying()
+    queries = GraphQuerying()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--query", type=str, default="Elizabeth I")
     args = parser.parse_args()
 
-    response = extractor.answering_graph(query=args.query)
+    response = queries.answering_graph(query=args.query)
     print(f"Query: {args.query}")
     print(response)

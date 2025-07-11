@@ -50,24 +50,21 @@ class GraphVisualizer:
             nodes.add((record["target_id"], record["target_labels"][0]))
         nodes = list(nodes)
 
-        np.random.seed(42)  # Để cố định tọa độ khi chạy lại
+        np.random.seed(42)
         x_nodes = np.random.uniform(0, 10, len(nodes))
         y_nodes = np.random.uniform(0, 10, len(nodes))
         z_nodes = np.random.uniform(0, 10, len(nodes))
 
-        # Map node id với index
         node_map = {node[0]: i for i, node in enumerate(nodes)}
 
-        # Định nghĩa màu sắc cho type node
-
         type_colors = {
-            "PERSON": "#FF6B6B",    # Đỏ nhạt
-            "PLACE": "#4ECDC4",     # Xanh ngọc
-            "TIME_PERIOD": "#FFD93D",  # Vàng
-            "EVENT": "#95E1D3",     # Xanh lá nhạt
-            "ORGANIZATION": "#F7C8E0",  # Hồng nhạt
-            "CONCEPT": "#B9BBDF",   # Tím nhạt
-            "OBJECT": "#FF9F1C"     # Cam
+            "PERSON": "#FF6B6B",
+            "PLACE": "#4ECDC4",
+            "TIME_PERIOD": "#FFD93D",
+            "EVENT": "#95E1D3",
+            "ORGANIZATION": "#F7C8E0",
+            "CONCEPT": "#B9BBDF",
+            "OBJECT": "#FF9F1C"
         }
 
         # Tạo danh sách node
@@ -156,13 +153,13 @@ class GraphVisualizer:
         )
 
         type_colors = {
-            "PERSON": "#FF6B6B",    # Đỏ nhạt
-            "PLACE": "#4ECDC4",     # Xanh ngọc
-            "TIME_PERIOD": "#FFD93D",  # Vàng
-            "EVENT": "#95E1D3",     # Xanh lá nhạt
-            "ORGANIZATION": "#F7C8E0",  # Hồng nhạt
-            "CONCEPT": "#B9BBDF",   # Tím nhạt
-            "OBJECT": "#FF9F1C"     # Cam
+            "PERSON": "#FF6B6B",
+            "PLACE": "#4ECDC4",
+            "TIME_PERIOD": "#FFD93D",
+            "EVENT": "#95E1D3",
+            "ORGANIZATION": "#F7C8E0",
+            "CONCEPT": "#B9BBDF",
+            "OBJECT": "#FF9F1C"
         }
 
         for record in results:
@@ -175,10 +172,10 @@ class GraphVisualizer:
             net.add_node(
                 source_id,
                 label=source_id,
-                title=f"Type: {source_label}",  # Tooltip khi hover
-                color=type_colors.get(source_label, "#FFFFFF"),  # Màu theo type, mặc định trắng
-                size=15,  # Kích thước node
-                shape="dot",  # Hình tròn
+                title=f"Type: {source_label}",
+                color=type_colors.get(source_label, "#FFFFFF"),
+                size=15,
+                shape="dot",
                 font={"size": 14, "face": "arial"}
             )
 
@@ -198,13 +195,12 @@ class GraphVisualizer:
                 source_id,
                 target_id,
                 label=rel_type,
-                title=rel_type,  # Tooltip cho edge
-                color="#848484",  # Màu xám nhạt cho edge
-                width=1.5,  # Độ dày edge
+                title=rel_type,
+                color="#848484",
+                width=1.5,
                 font={"size": 12, "align": "middle"}
             )
 
-        # Tùy chỉnh giao diện
         net.set_options("""
         {
             "physics": {
@@ -251,9 +247,9 @@ class GraphVisualizer:
 
     def visualize_graph(self, limit: int = 500, visualize_type: Literal["2d", "3d"] = "2d"):
         if visualize_type == "2d":
-            self.visualize_graph_2d(limit=limit, output_file=f"../graph_{visualize_type}.html")
+            self.visualize_graph_2d(limit=limit, output_file=f"graph_{visualize_type}.html")
         elif visualize_type == "3d":
-            self.visualize_graph_3d(limit=limit, output_file=f"../graph_{visualize_type}.html")
+            self.visualize_graph_3d(limit=limit, output_file=f"graph_{visualize_type}.html")
         else:
             raise ValueError(f"Invalid visualize_type: {visualize_type}. Must be visualize in '2d' or '3d'.")
 

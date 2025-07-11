@@ -7,5 +7,5 @@ class TextPreprocessor:
             chunk_overlap=chunk_overlap
         )
 
-    def preprocess(self, documents: list):
+    def chunking(self, documents: list):
         return self.splitter.split_documents(documents)
