@@ -3,7 +3,7 @@ from openai import OpenAI
 from typing import Optional
 
 from graphRAG.utils.utils import parse_json
-from services.queries import GraphRetriever
+from graphRAG.services.queries import GraphRetriever
 from graphRAG.config.setting import llm_config, neo4j_config
 from graphRAG.prompt.prompts import ANSWERING_SYSTEM_PROMPT, ANSWERING_PROMPT
 

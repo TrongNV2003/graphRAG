@@ -5,7 +5,6 @@ from graphRAG.utils.utils import parse_json
 from graphRAG.config.setting import llm_config
 from graphRAG.prompt.prompts import EXTRACT_SYSTEM_PROMPT, EXTRACT_PROMPT
 
-
 class GraphExtractor:
     def __init__(self, llm: Optional[OpenAI] = None):
         if llm is None:
