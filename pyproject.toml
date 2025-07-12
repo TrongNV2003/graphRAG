@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "graphrag"
+version = "0.1.0"
+description = "Retrieval Argumented Generation with Graph knowledge with Qwen2.5-72B"
+authors = ["Trong Nguyen <trongnguyen220603@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+langchain = "0.3.26"
+langchain-community = "0.3.27"
+langchain-core = "0.3.68"
+langchain-neo4j = "0.4.0"
+loguru = "0.7.3"
+neo4j = "5.28.1"
+numpy = "2.3.1"
+openai = "1.95.1"
+plotly = "6.0.1"
+pydantic = "2.11.7"
+pydantic-settings = "2.10.1"
+pymupdf = "1.26.3"
+python-dotenv = "1.1.1"
+pyvis = "0.3.2"
+sentence-transformers = "4.1.0"
+wikipedia = "1.4.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
