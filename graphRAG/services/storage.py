@@ -17,12 +17,10 @@ class GraphStorage:
         return value.replace("'", "\\'")
 
     def _get_embedding(self, node: dict) -> list:
-        """Tạo embedding cho node dựa trên id và role."""
-        text = f"{node.get('id', '')} {node.get('role', '')}".strip()
+        text = f"{node['id']} {node.get('role', '')}".strip()
         return self.embedder.encode(text).tolist()
 
     def store(self, graph_data, clear_old_graph=False):
-        # Xóa đồ thị cũ
         if clear_old_graph:
             self.graph.query("MATCH (n) DETACH DELETE n")
 
@@ -30,10 +28,9 @@ class GraphStorage:
         for node in graph_data["nodes"]:
             sanitized_type = self._standard_label(node["type"])
             sanitized_id = self._standard_property(node["id"])
-            sanitized_alias = self._standard_property(node.get("alias", ""))
+            sanitized_role = self._standard_property(node.get("role", ""))
             embedding = self._get_embedding(node)
             
-            # (n:PERSON {id: "Elizabeth I"})
             query = f"""
             MERGE (n:{sanitized_type} {{id: $id}})
             SET n.name = $id, n.role = $role, n.embedding = $embedding
@@ -42,7 +39,7 @@ class GraphStorage:
             try:
                 self.graph.query(query, params={
                     "id": sanitized_id,
-                    "role": sanitized_alias,
+                    "role": sanitized_role,
                     "embedding": embedding
                 })
             except Exception as e:

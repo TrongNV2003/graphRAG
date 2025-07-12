@@ -20,11 +20,11 @@ EXTRACT_PROMPT = (
     "</input>\n"
 )
 
-ANSWERING_SYSTEM_PROMPT = """You are an assistant expert in describing user's input based on the provided graphs."""
+ANSWERING_SYSTEM_PROMPT = """You are an assistant expert in describing user's input based on the provided information."""
 
 ANSWERING_PROMPT = (
     "### Role:\n"
-    "You are an expert in describing users' input based on provided graphs.\n"
+    "You are an expert in describing users' input based on provided information.\n"
     "\n"
     "### Instruction: \n"
     "- Make sure that you use 'List graph schemas' provided to describe the query accurately.\n"

@@ -2,13 +2,13 @@ import os
 import json
 import argparse
 from loguru import logger
-from typing import Dict, List
+from typing import Dict, List, Optional
 from sentence_transformers import SentenceTransformer
 
-from graphRAG.config.setting import neo4j_config, model_config
+from graphRAG.services.storage import GraphStorage
 from graphRAG.dataloaders.loaders import DataLoader
 from graphRAG.services.extractor import GraphExtractor
-from graphRAG.services.storage import GraphStorage
+from graphRAG.config.setting import neo4j_config, model_config
 
 class GraphIndexing:
     def __init__(self):
@@ -20,7 +20,7 @@ class GraphIndexing:
             password=neo4j_config.password
         )
         self.embedder = SentenceTransformer(model_config.embedder_model)
-        self.output_dir = "graphRAG/data/format_data"
+        self.output_dir = "graphRAG/data/entities_extracted"
 
     def _get_embeddings(self, node: Dict) -> List[float]:
         text = f"{node['id']} {node.get('role', '')}".strip()
@@ -28,15 +28,14 @@ class GraphIndexing:
 
     def indexing(
             self,
-            data_path: str,
-            save_graph_path: str = None,
-            load_graph_data_path: str = None
+            data_path: Optional[str] = None,
+            save_graph_path: Optional[str] = None,
         ) -> None:
 
-        if load_graph_data_path is not None:
-            with open(load_graph_data_path, "r", encoding="utf-8") as f:
+        if save_graph_path and os.path.exists(save_graph_path):
+            with open(save_graph_path, "r", encoding="utf-8") as f:
                 combined_graph_data = json.load(f)
-            logger.info(f"Loaded graph data from {load_graph_data_path}: {len(combined_graph_data['nodes'])} nodes, "
+            logger.info(f"Loaded graph data from {save_graph_path}: {len(combined_graph_data['nodes'])} nodes, "
                     f"{len(combined_graph_data['relationships'])} relationships")
             
             for node in combined_graph_data["nodes"]:
@@ -46,11 +45,12 @@ class GraphIndexing:
             logger.info("Graph data uploaded to Neo4j successfully!")
             return
         
+        
         raw_docs = self.loader.load(file_path=data_path, save_to=True)
         
         all_nodes = []
         all_relationships = []
-        batch_size = 5
+        batch_size = 3
 
         for i, doc in enumerate(raw_docs):
             logger.info(f"Processing document {i + 1}/{len(raw_docs)} with length {len(doc.page_content)} characters")
@@ -86,7 +86,7 @@ class GraphIndexing:
                 os.makedirs(self.output_dir)
 
             if save_graph_path:
-                with open(f"{self.output_dir}/{save_graph_path}.json", "w", encoding="utf-8") as f:
+                with open(save_graph_path, "w", encoding="utf-8") as f:
                     json.dump(combined_graph_data, f, ensure_ascii=False, indent=4)
                 logger.info(f"Entities graph saved to {save_graph_path}")
 
@@ -97,15 +97,11 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, help="path to raw data: wikipedia, pdf, json (e.g: graphRAG/data/raw_data/sample.pdf)")
 
     # Sau khi entities được extracted thì có thể save lại dưới dạng JSON
-    parser.add_argument("--save_graph_path", type=str, default="node_relationship.json", help="Path to save extracted entities (nodes and relationships) to JSON file")
-
-    # Nếu đã có load_graph_data_path thì upsert trực tiếp lên Neo4j, không cần crawl hoặc extract
-    parser.add_argument("--load_graph_data_path", type=str, help="Load entities graph data from JSON file")
+    parser.add_argument("--save_graph_path", type=str, default="graphRAG/data/entities_extracted/node_relationship.json", help="Path to save extracted entities (nodes and relationships) to JSON file")
     args = parser.parse_args()
 
     graph_indexing = GraphIndexing()
     graph_indexing.indexing(
         data_path=args.data_path,
         save_graph_path=args.save_graph_path,
-        load_graph_data_path=args.load_graph_data_path,
     )

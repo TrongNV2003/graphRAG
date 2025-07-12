@@ -21,10 +21,16 @@ class GraphRetriever:
             MATCH (n)
             WHERE n.id = $node_id OR n.role = $node_id
             MATCH (n)-[r]-(other)
+            // Xác định source_node và target_node trước
+            WITH
+                CASE WHEN startNode(r) = n THEN n ELSE other END AS source_node,
+                r,
+                CASE WHEN endNode(r) = n THEN n ELSE other END AS target_node
+            // Trả về một map (dictionary) cho source và target
             RETURN DISTINCT
-                CASE WHEN startNode(r) = n THEN n.id ELSE other.id END AS source,
+                { id: source_node.id, role: source_node.role, type: labels(source_node)[0] } AS source,
                 type(r) AS relationship,
-                CASE WHEN endNode(r) = n THEN n.id ELSE other.id END AS target
+                { id: target_node.id, role: target_node.role, type: labels(target_node)[0] } AS target
             LIMIT $limit
         """
        
@@ -60,12 +66,16 @@ class GraphRetriever:
                 
                 CALL (n) {
                     MATCH (n)-[r]->(m)
-                    RETURN n.id AS source, type(r) AS relationship, m.id AS target
-                    
+                    RETURN
+                        { id: n.id, role: n.role, type: labels(n)[0] } AS source,
+                        type(r) AS relationship,
+                        { id: m.id, role: m.role, type: labels(m)[0] } AS target
                     UNION
-                    
                     MATCH (s)-[r]->(n)
-                    RETURN s.id AS source, type(r) AS relationship, n.id AS target
+                    RETURN
+                        { id: s.id, role: s.role, type: labels(s)[0] } AS source,
+                        type(r) AS relationship,
+                        { id: n.id, role: n.role, type: labels(n)[0] } AS target
                 }
                 
                 RETURN source, relationship, target
@@ -82,12 +92,12 @@ if __name__ == "__main__":
         username=neo4j_config.username,
         password=neo4j_config.password
     )
-    query = "Who was ruled England?"
+    query = "Who was Richard I?"
     results = retrieval.retrieve(query, limit=20)
 
     if results:
         logger.info(f"Retrieved {len(results)} relationships for '{query}':")
         for result in results:
-            print(f"{result['source']} -[{result['relationship']}]-> {result['target']}")
+            print(result)
     else:
         logger.warning(f"No results found for '{query}'.")
