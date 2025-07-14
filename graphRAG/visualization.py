@@ -30,7 +30,12 @@ class GraphVisualizer:
             (node source) ---------------> (node target)
         """
 
-        results = self._query_graph(query=GET_RELATIONSHIPS_CYPHER, limit=limit)
+        relationships_cypher = """
+            MATCH (n)-[r]->(m)
+            RETURN n.id AS source, type(r) AS relationship, m.id AS target
+        """
+
+        results = self._query_graph(query=relationships_cypher, limit=limit)
         logger.info(f"Showing {len(results)} relationships from Neo4j:")
         for record in results:
             print(f"{record['source']} -[{record['relationship']}]-> {record['target']}")
@@ -41,8 +46,13 @@ class GraphVisualizer:
                (node n)     relationship     (node m)
             (node source) ---------------> (node target)
         """
-    
-        results = self._query_graph(query=GET_NODE_RELATIONSHIPS_CYPHER, limit=limit)
+        get_node_relationships_cypher = """
+            MATCH (n)-[r]->(m)
+            RETURN n.id AS source_id, n.name AS source_name, type(r) AS rel_type,
+                    m.id AS target_id, m.name AS target_name, labels(n) AS source_labels, labels(m) AS target_labels
+        """
+
+        results = self._query_graph(query=get_node_relationships_cypher, limit=limit)
 
         nodes = set()
         for record in results:
@@ -119,7 +129,6 @@ class GraphVisualizer:
             margin=dict(l=0, r=0, b=0, t=40)
         )
 
-        # Kết hợp traces và vẽ
         fig = go.Figure(data=[edge_trace] + node_traces, layout=layout)
         fig.write_html(output_file)
         logger.info(f"3D graph visualization saved to {output_file}")
@@ -130,8 +139,14 @@ class GraphVisualizer:
                (node n)     relationship     (node m)
             (node source) ---------------> (node target)
         """
+        
+        get_node_relationships_cypher = """
+            MATCH (n)-[r]->(m)
+            RETURN n.id AS source_id, n.name AS source_name, type(r) AS rel_type,
+                    m.id AS target_id, m.name AS target_name, labels(n) AS source_labels, labels(m) AS target_labels
+        """
 
-        results = self._query_graph(query=GET_NODE_RELATIONSHIPS_CYPHER, limit=limit)
+        results = self._query_graph(query=get_node_relationships_cypher, limit=limit)
 
         net = Network(
             notebook=True,

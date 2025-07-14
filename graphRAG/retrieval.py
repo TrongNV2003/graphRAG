@@ -7,7 +7,6 @@ from graphRAG.services.queries import GraphRetriever
 from graphRAG.config.setting import llm_config, neo4j_config
 from graphRAG.prompt.prompts import ANSWERING_SYSTEM_PROMPT, ANSWERING_PROMPT
 
-
 class GraphQuerying:
     def __init__(self, llm: Optional[OpenAI] = None):
         if llm is None:
