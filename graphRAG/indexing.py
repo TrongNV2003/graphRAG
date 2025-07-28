@@ -7,19 +7,19 @@ from sentence_transformers import SentenceTransformer
 
 from graphRAG.services.storage import GraphStorage
 from graphRAG.dataloaders.loaders import DataLoader
-from graphRAG.services.extractor import GraphExtractor
-from graphRAG.config.setting import neo4j_config, model_config
+from graphRAG.services.extractor import GraphExtractorLLM
+from graphRAG.config.setting import neo4j_config, embed_config
 
 class GraphIndexing:
     def __init__(self):
         self.loader = DataLoader()
-        self.extractor = GraphExtractor()
+        self.extractor = GraphExtractorLLM()
         self.storage = GraphStorage(
             url=neo4j_config.url,
             username=neo4j_config.username,
             password=neo4j_config.password
         )
-        self.embedder = SentenceTransformer(model_config.embedder_model)
+        self.embedder = SentenceTransformer(embed_config.embedder_model)
         self.output_dir = "graphRAG/data/entities_extracted"
 
     def _get_embeddings(self, node: Dict) -> List[float]:
@@ -54,7 +54,7 @@ class GraphIndexing:
 
         for i, doc in enumerate(raw_docs):
             logger.info(f"Processing document {i + 1}/{len(raw_docs)} with length {len(doc.page_content)} characters")
-            graph_data_path = self.extractor.extract_graph(doc)
+            graph_data_path = self.extractor.call(doc)
 
             for node in graph_data_path["nodes"]:
                 node["embedding"] = self._get_embeddings(node)

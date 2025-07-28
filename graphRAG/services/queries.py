@@ -3,12 +3,12 @@ from typing import List, Dict
 from langchain_neo4j import Neo4jGraph
 from sentence_transformers import SentenceTransformer
 
-from graphRAG.config.setting import neo4j_config, model_config
+from graphRAG.config.setting import neo4j_config, embed_config
 
 class GraphRetriever:
     def __init__(self, url: str, username: str, password: str):
         self.graph = Neo4jGraph(url=url, username=username, password=password)
-        self.embedder = SentenceTransformer(model_config.embedder_model)
+        self.embedder = SentenceTransformer(embed_config.embedder_model)
 
     def _get_embedding(self, text: str) -> list:
         return self.embedder.encode(text).tolist()

@@ -45,13 +45,13 @@ class Neo4jConfig(BaseSettings):
         driver.verify_connectivity()
         return driver
 
-class ModelConfig(BaseSettings):
+class EmbeddingModelConfig(BaseSettings):
     embedder_model: str = Field(
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default="hiieu/halong_embedding",
         description="Model name for sentence embedding",
         alias="EMBEDDER_MODEL"
     )
 
 llm_config = LLMConfig()
 neo4j_config = Neo4jConfig()
-model_config = ModelConfig()
+embed_config = EmbeddingModelConfig()
