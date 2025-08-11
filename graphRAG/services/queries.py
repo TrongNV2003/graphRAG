@@ -6,8 +6,12 @@ from sentence_transformers import SentenceTransformer
 from graphRAG.config.setting import neo4j_config, embed_config
 
 class GraphRetriever:
-    def __init__(self, url: str, username: str, password: str):
-        self.graph = Neo4jGraph(url=url, username=username, password=password)
+    def __init__(self):
+        self.graph = Neo4jGraph(
+            url=neo4j_config.url,
+            username=neo4j_config.username,
+            password=neo4j_config.password
+        )
         self.embedder = SentenceTransformer(embed_config.embedder_model)
 
     def _get_embedding(self, text: str) -> list:
@@ -87,11 +91,8 @@ class GraphRetriever:
         return results
     
 if __name__ == "__main__":
-    retrieval = GraphRetriever(
-        url=neo4j_config.url,
-        username=neo4j_config.username,
-        password=neo4j_config.password
-    )
+    retrieval = GraphRetriever()
+    
     query = "Who was Richard I?"
     results = retrieval.retrieve(query, limit=20)
 

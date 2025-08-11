@@ -19,11 +19,7 @@ class GraphQuerying:
             llm = OpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
 
         self.llm = llm
-        self.retriever = GraphRetriever(
-            url=neo4j_config.url,
-            username=neo4j_config.username,
-            password=neo4j_config.password
-        )
+        self.retriever = GraphRetriever()
         self.prompt_template = ANSWERING_PROMPT
         
     def _inject_prompt(self, query: str) -> str:

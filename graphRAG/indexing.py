@@ -13,17 +13,13 @@ from sentence_transformers import SentenceTransformer
 from graphRAG.services.storage import GraphStorage
 from graphRAG.dataloaders.loaders import DataLoader
 from graphRAG.services.extractor import GraphExtractorLLM
-from graphRAG.config.setting import neo4j_config, embed_config
+from graphRAG.config.setting import embed_config
 
 class GraphIndexing:
     def __init__(self):
         self.loader = DataLoader()
         self.extractor = GraphExtractorLLM()
-        self.storage = GraphStorage(
-            url=neo4j_config.url,
-            username=neo4j_config.username,
-            password=neo4j_config.password
-        )
+        self.storage = GraphStorage()
         self.embedder = SentenceTransformer(embed_config.embedder_model)
         self.output_dir = "graphRAG/data/entities_extracted"
 

@@ -2,11 +2,15 @@ from loguru import logger
 from langchain_neo4j import Neo4jGraph
 from sentence_transformers import SentenceTransformer
 
-from graphRAG.config.setting import embed_config
+from graphRAG.config.setting import neo4j_config, embed_config
 
 class GraphStorage:
-    def __init__(self, url: str, username: str, password: str):
-        self.graph = Neo4jGraph(url=url, username=username, password=password)
+    def __init__(self):
+        self.graph = Neo4jGraph(
+            url=neo4j_config.url,
+            username=neo4j_config.username,
+            password=neo4j_config.password
+        )
         self.embedder = SentenceTransformer(embed_config.embedder_model)
 
     def _standard_label(self, label: str) -> str:
