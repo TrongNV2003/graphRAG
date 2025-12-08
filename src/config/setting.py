@@ -14,7 +14,7 @@ class LLMConfig(BaseSettings):
         description="API key for OpenAI",
         alias="LLM_KEY",
     )
-    model: str = Field(
+    llm_model: str = Field(
         description="Model name to be used (e.g., GPT-4)",
         alias="LLM_MODEL",
     )

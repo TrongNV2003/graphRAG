@@ -1,19 +1,14 @@
 import os
-import sys
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
-
 import json
 import argparse
 from loguru import logger
 from typing import Dict, List, Optional
 from sentence_transformers import SentenceTransformer
 
-from graphRAG.services.storage import GraphStorage
-from graphRAG.dataloaders.loaders import DataLoader
-from graphRAG.services.extractor import GraphExtractorLLM
-from graphRAG.config.setting import embed_config
+from src.handler.storage import GraphStorage
+from src.processing.dataloaders import DataLoader
+from src.handler.extractor import GraphExtractorLLM
+from src.config.setting import embed_config
 
 class GraphIndexing:
     def __init__(self):
@@ -21,7 +16,7 @@ class GraphIndexing:
         self.extractor = GraphExtractorLLM()
         self.storage = GraphStorage()
         self.embedder = SentenceTransformer(embed_config.embedder_model)
-        self.output_dir = "graphRAG/data/entities_extracted"
+        self.output_dir = "src/data/entities_extracted"
 
     def _get_embeddings(self, node: Dict) -> List[float]:
         text = f"{node['id']} {node.get('role', '')}".strip()
@@ -95,10 +90,10 @@ class GraphIndexing:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Crawl data từ wikipedia, hoặc load từ pdf, json
-    parser.add_argument("--data_path", type=str, help="path to raw data: wikipedia, pdf, json (e.g: graphRAG/data/raw_data/sample.pdf)")
+    parser.add_argument("--data_path", type=str, help="path to raw data: wikipedia, pdf, json (e.g: src/data/raw_data/sample.pdf)")
 
     # Sau khi entities được extracted thì có thể save lại dưới dạng JSON
-    parser.add_argument("--save_graph_path", type=str, default="graphRAG/data/entities_extracted/node_relationship.json", help="Path to save extracted entities (nodes and relationships) to JSON file")
+    parser.add_argument("--save_graph_path", type=str, default="src/data/entities_extracted/node_relationship.json", help="Path to save extracted entities (nodes and relationships) to JSON file")
     args = parser.parse_args()
 
     graph_indexing = GraphIndexing()

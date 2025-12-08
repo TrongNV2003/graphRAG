@@ -8,10 +8,10 @@ import argparse
 from openai import OpenAI
 from typing import Optional
 
-from graphRAG.utils.utils import parse_json
-from graphRAG.services.queries import GraphRetriever
-from graphRAG.config.setting import llm_config, neo4j_config
-from graphRAG.prompt.prompts import ANSWERING_SYSTEM_PROMPT, ANSWERING_PROMPT
+from src.utils.utils import parse_json
+from src.handler.queries import GraphRetriever
+from src.config.setting import llm_config, neo4j_config
+from src.prompt.ner import ANSWERING_SYSTEM_PROMPT, ANSWERING_PROMPT
 
 class GraphQuerying:
     def __init__(self, llm: Optional[OpenAI] = None):
@@ -36,7 +36,7 @@ class GraphQuerying:
             seed=llm_config.seed,
             temperature=llm_config.temperature,
             top_p=llm_config.top_p,
-            model=llm_config.model,
+            model=llm_config.llm_model,
             messages=[
                 {"role": "system", "content": ANSWERING_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt_str},

@@ -12,8 +12,8 @@ from pyvis.network import Network
 import plotly.graph_objects as go
 from langchain_neo4j import Neo4jGraph
 
-from graphRAG.config.setting import neo4j_config
-from graphRAG.prompt.prompts import GET_RELATIONSHIPS_CYPHER, GET_NODE_RELATIONSHIPS_CYPHER
+from src.config.setting import neo4j_config
+from src.prompt.ner import GET_RELATIONSHIPS_CYPHER, GET_NODE_RELATIONSHIPS_CYPHER
 
 class GraphVisualizer:
     def __init__(self):

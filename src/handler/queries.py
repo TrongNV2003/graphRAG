@@ -3,7 +3,7 @@ from typing import List, Dict
 from langchain_neo4j import Neo4jGraph
 from sentence_transformers import SentenceTransformer
 
-from graphRAG.config.setting import neo4j_config, embed_config
+from src.config.setting import neo4j_config, embed_config
 
 class GraphRetriever:
     def __init__(self):
