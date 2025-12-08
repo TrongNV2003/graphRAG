@@ -15,13 +15,13 @@ underthesea==6.8.4
 google-generativeai==0.8.5
 python-docx==1.2.0
 llama-index==0.12.33
-langchain-neo4j==0.4.0
 matplotlib==3.10.3
-langchain-text-splitters==0.3.8
 sentence-transformers==5.0.0
 tiktoken==0.9.0
 neo4j==5.28.1
 langchain-neo4j==0.4.0
+langchain-community==0.3.27
+langchain-text-splitters==0.3.8
 plotly==6.0.1
 pyvis==0.3.2
-langchain-community==0.3.27
+wikipedia==1.4.0
