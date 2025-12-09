@@ -2,102 +2,188 @@ import os
 import json
 import argparse
 from loguru import logger
-from typing import Dict, List, Optional
-from sentence_transformers import SentenceTransformer
+from typing import List, Optional, Dict
 
-from src.handler.storage import GraphStorage
+from openai import OpenAI
+from langchain_neo4j import Neo4jGraph
+
+
+from src.config.schemas import StructuralChunk
 from src.processing.dataloaders import DataLoader
-from src.handler.extractor import GraphExtractorLLM
-from src.config.setting import embed_config
+from src.handler.storage import GraphStorage
+from src.handler.chunking import TwoPhaseDocumentChunker
+from src.engines.llm import EntityExtractionLLM
+from src.processing.preprocessing import EntityPostprocessor
+from src.config.setting import api_config, llm_config, neo4j_config, embed_config
+from src.prompts.ner import EXTRACT_SYSTEM_PROMPT, EXTRACT_PROMPT_TEMPLATE, EXTRACT_SCHEMA
 
 class GraphIndexing:
-    def __init__(self):
-        self.loader = DataLoader()
-        self.extractor = GraphExtractorLLM()
-        self.storage = GraphStorage()
-        self.embedder = SentenceTransformer(embed_config.embedder_model)
-        self.output_dir = "src/data/entities_extracted"
+    def __init__(self, client: OpenAI, graph_db: Neo4jGraph, chunk_size: int = 2048):
+        self.client = client
+        self.graph_db = graph_db
+        self.chunk_size = chunk_size
+        
+        self.wikiloader = DataLoader()
+        
+        self.chunker = TwoPhaseDocumentChunker(
+            chunk_size=self.chunk_size,
+            tokenize_model=llm_config.llm_model,
+            verbose=False
+        )
+        
+        self.extractor = EntityExtractionLLM(
+            client=self.client,
+            system_prompt=EXTRACT_SYSTEM_PROMPT,
+            prompt_template=EXTRACT_PROMPT_TEMPLATE,
+            json_schema=EXTRACT_SCHEMA,
+        )
+        
+        self.postprocessor = EntityPostprocessor()
+        
+        self.storage = GraphStorage(self.graph_db)
 
-    def _get_embeddings(self, node: Dict) -> List[float]:
-        text = f"{node['id']} {node.get('role', '')}".strip()
-        return self.embedder.encode(text).tolist()
+    def _chunking(self, document: dict, max_new_chunk_size: Optional[int] = None) -> List['StructuralChunk']:
+        chunks = self.chunker.chunk_document(document, max_new_chunk_size=max_new_chunk_size)
+        return chunks
 
-    def indexing(
-            self,
-            data_path: Optional[str] = None,
-            save_graph_path: Optional[str] = None,
-        ) -> None:
+    def indexing(self, chunks: List['StructuralChunk'], clear_old_graph: bool = False) -> None:
+        """Index pre-chunked data into the graph database."""
+        batch_size = 5
+        all_nodes: List[Dict] = []
+        all_relationships: List[Dict] = []
+        batch_nodes: List[Dict] = []
+        batch_relationships: List[Dict] = []
+        total_nodes_processed = 0
+        total_relationships_processed = 0
+        total_chunks = len(chunks)
+        
+        if clear_old_graph:
+            logger.info("Clearing existing graph data")
+            self.storage.clear_all()
 
-        if save_graph_path and os.path.exists(save_graph_path):
-            with open(save_graph_path, "r", encoding="utf-8") as f:
-                combined_graph_data = json.load(f)
-            logger.info(f"Loaded graph data from {save_graph_path}: {len(combined_graph_data['nodes'])} nodes, "
-                    f"{len(combined_graph_data['relationships'])} relationships")
+        for i, chunk in enumerate(chunks):
+            text = getattr(chunk, "content", None) or chunk.get("content", "")
+            if not text:
+                logger.warning(f"Skipping empty chunk at index {i}")
+                continue
+
+            logger.info(f"Processing chunk {i + 1}/{total_chunks}")
             
-            for node in combined_graph_data["nodes"]:
-                node["embedding"] = self._get_embeddings(node)
+            try:
+                extracted_data = self.extractor.call(text=text)
+            except Exception:
+                logger.warning(f"API call failed for chunk {i + 1}")
+                continue
             
-            self.storage.store(combined_graph_data, clear_old_graph=True)
-            logger.info("Graph data uploaded to Neo4j successfully!")
-            return
-        
-        
-        raw_docs = self.loader.load(file_path=data_path, save_to=True)
-        
-        all_nodes = []
-        all_relationships = []
-        batch_size = 3
+            if not extracted_data or "nodes" not in extracted_data or "relationships" not in extracted_data:
+                continue
+            
+            cleaned_nodes: List[Dict] = []
+            for node in extracted_data.get("nodes", []):
+                cleaned_nodes.append({
+                    "id": self.postprocessor(node.get("id", "")),
+                    "entity_type": self.postprocessor(node.get("entity_type", "")),
+                    "entity_role": self.postprocessor(node.get("entity_role", "")),
+                })
+            
+            cleaned_relationships: List[Dict] = []
+            for rel in extracted_data.get("relationships", []):
+                cleaned_relationships.append({
+                    "source": self.postprocessor(rel.get("source", "")),
+                    "target": self.postprocessor(rel.get("target", "")),
+                    "relationship_type": self.postprocessor(rel.get("relationship_type", "")),
+                })
 
-        for i, doc in enumerate(raw_docs):
-            logger.info(f"Processing document {i + 1}/{len(raw_docs)} with length {len(doc.page_content)} characters")
-            graph_data_path = self.extractor.call(doc)
+            batch_nodes.extend(cleaned_nodes)
+            batch_relationships.extend(cleaned_relationships)
+            
+            logger.info(f"Extracted chunk {i + 1}: {len(cleaned_nodes)} entities, {len(cleaned_relationships)} relationships")
 
-            for node in graph_data_path["nodes"]:
-                node["embedding"] = self._get_embeddings(node)
-
-            all_nodes.extend(graph_data_path["nodes"])
-            all_relationships.extend(graph_data_path["relationships"])
-            logger.info(f"Extracted {len(all_nodes)} nodes and {len(all_relationships)} relationships")
-
-            if (i + 1) % batch_size == 0 or (i + 1) == len(raw_docs):
-                combined_graph_data = {
-                    "nodes": all_nodes,
-                    "relationships": all_relationships
+            if (i + 1) % batch_size == 0 or (i + 1) == total_chunks:
+                dedup_nodes = self._deduplicate_entities(batch_nodes)
+                dedup_relationships = self._deduplicate_relationships(batch_relationships)
+                
+                batch_graph_data = {
+                    "nodes": dedup_nodes,
+                    "relationships": dedup_relationships
                 }
-                logger.info(f"Storing batch at document {i + 1}: {len(all_nodes)} nodes, {len(all_relationships)} relationships")
-                self.storage.store(combined_graph_data, clear_old_graph=False)
-
-
-        if all_nodes or all_relationships:
-            combined_graph_data = {
-                "nodes": all_nodes,
-                "relationships": all_relationships
-            }
-            self.storage.store(combined_graph_data, clear_old_graph=False)
-
-            logger.info(f"GraphRAG extracted {len(all_nodes)} nodes and {len(all_relationships)} relationships")
-            print("Final store:", combined_graph_data)
+                self.storage.store(batch_graph_data)
+                
+                total_nodes_processed += len(batch_graph_data['nodes'])
+                total_relationships_processed += len(batch_graph_data['relationships'])
+                
+                all_nodes.extend(dedup_nodes)
+                all_relationships.extend(dedup_relationships)
+                
+                # Reset batch
+                batch_nodes = []
+                batch_relationships = []
+                
+        logger.info(f"Total nodes upserted: {total_nodes_processed}, Total relationships upserted: {total_relationships_processed}")
+        return all_nodes, all_relationships
             
-            if not os.path.exists(self.output_dir):
-                os.makedirs(self.output_dir)
+    def _deduplicate_entities(self, entities: List[Dict]) -> List[Dict]:
+        """Remove duplicate entities based on (id, entity_type, entity_role)."""
+        seen = set()
+        deduplicated: List[Dict] = []
+        
+        for entity in entities:
+            entity_id = entity.get('id', '').strip()
+            entity_type = entity.get('entity_type', '').strip()
+            entity_role = entity.get('entity_role', '').strip()
+            if not entity_id:
+                continue
+            key = (entity_id, entity_type, entity_role)
+            if key not in seen:
+                seen.add(key)
+                deduplicated.append(entity)
+            else:
+                logger.debug(f"Duplicate entity skipped: {key}")
+        
+        return deduplicated
 
-            if save_graph_path:
-                with open(save_graph_path, "w", encoding="utf-8") as f:
-                    json.dump(combined_graph_data, f, ensure_ascii=False, indent=4)
-                logger.info(f"Entities graph saved to {save_graph_path}")
-
+    def _deduplicate_relationships(self, relationships: List[Dict]) -> List[Dict]:
+        """
+        Remove duplicate relationships based on source, target, and relationship_type.
+        If duplicates exist, keep the first occurrence.
+        """
+        seen = set()
+        deduplicated = []
+        
+        for relationship in relationships:
+            source = relationship.get('source', '')
+            target = relationship.get('target', '')
+            rel_type = relationship.get('relationship_type', '')
+            
+            key = (source, target, rel_type)
+            
+            if key not in seen:
+                seen.add(key)
+                deduplicated.append(relationship)
+            else:
+                logger.debug(f"Duplicate relationship found and removed: source='{source}', target='{target}', type='{rel_type}'")
+        
+        return deduplicated
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    # Crawl data từ wikipedia, hoặc load từ pdf, json
-    parser.add_argument("--data_path", type=str, help="path to raw data: wikipedia, pdf, json (e.g: src/data/raw_data/sample.pdf)")
-
-    # Sau khi entities được extracted thì có thể save lại dưới dạng JSON
-    parser.add_argument("--save_graph_path", type=str, default="src/data/entities_extracted/node_relationship.json", help="Path to save extracted entities (nodes and relationships) to JSON file")
+    parser = argparse.ArgumentParser(description="GraphRAG indexing pipeline")
+    parser.add_argument("--query", type=str, default="Elizabeth I", help="Search query or document identifier")
+    parser.add_argument("--load_max_docs", type=int, default=10, help="Max docs to load from source")
     args = parser.parse_args()
 
-    graph_indexing = GraphIndexing()
-    graph_indexing.indexing(
-        data_path=args.data_path,
-        save_graph_path=args.save_graph_path,
+    client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
+    
+    graph_db = Neo4jGraph(
+        url=neo4j_config.url,
+        username=neo4j_config.username,
+        password=neo4j_config.password
     )
+    
+    graph_indexing = GraphIndexing(client=client, graph_db=graph_db, chunk_size=2048)
+
+    raw_docs = graph_indexing.wikiloader.load(args.query, load_max_docs=args.load_max_docs)
+    all_chunks: List[StructuralChunk] = []
+    for doc in raw_docs:
+        all_chunks.extend(graph_indexing._chunking(doc["content"]))
+
+    graph_indexing.indexing(chunks=all_chunks, clear_old_graph=True)
