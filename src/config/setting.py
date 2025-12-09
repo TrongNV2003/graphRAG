@@ -1,39 +1,69 @@
-from pydantic import Field
+import os
+from typing import List
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 load_dotenv()
 
-class LLMConfig(BaseSettings):
+class APIConfig(BaseSettings):
     base_url: str = Field(
         description="Base URL for OpenAI API",
-        alias="LLM_URL",
+        alias="API_URL",
     )
     api_key: str = Field(
         description="API key for OpenAI",
-        alias="LLM_KEY",
+        alias="API_KEY",
     )
+
+class LLMTaskParams(BaseModel):
+    max_tokens: int = Field(default=8192, description="Maximum number of tokens for API responses")
+    temperature: float = Field(default=0.0, description="Sampling temperature; higher values make output more random")
+    top_p: float = Field(default=0.95, description="Nucleus sampling parameter; higher values increase randomness")
+    presence_penalty: float = Field(default=0.5, description="Penalty for new tokens based on existing ones; higher values discourage repetition, range [-2.0, 2.0] but typically suggest to [-1.0, 1.0]")
+    frequency_penalty: float = Field(default=0.5, description="Frequency penalty for new tokens based on their frequency; higher values discourage frequent tokens, range [-2.0, 2.0] but typically suggest to [-1.0, 1.0]")
+
+
+class LLMConfig(BaseSettings):
     llm_model: str = Field(
-        description="Model name to be used (e.g., GPT-4)",
+        default="Qwen/Qwen3-4B",
+        description="Large Language model name to be used (e.g., GPT-4)",
         alias="LLM_MODEL",
     )
-    max_tokens: int = Field(
-        default=1024,
-        alias="MAX_TOKENS",
-        description="Maximum number of tokens for API responses",
+    stop_tokens: List[str] = Field(
+        default=["</s>", "EOS", "<|im_end|>"],
+        alias="STOP_TOKENS",
+        description="Tokens that indicate the end of a sequence",
     )
-    temperature: float = Field(
-        default=0.0,
-        description="Sampling temperature; higher values make output more random",
-        alias="TEMPERATURE",
+    seed: int = Field(
+        default=42,
+        alias="SEED",
+        description="Random seed for sampling"
     )
-    top_p: float = Field(
-        default=0.95,
-        alias="TOP_P",
-        description="Nucleus sampling parameter; higher values increase randomness",
-    )
-    seed: int = Field(default=42, alias="SEED", description="Random seed for sampling")
+    
+    @property
+    def generation(self) -> LLMTaskParams:
+        return LLMTaskParams(
+            max_tokens=int(os.getenv("GENERATION_MAX_TOKENS", 16384)),
+            temperature=float(os.getenv("GENERATION_TEMPERATURE", 0.5)),
+            top_p=float(os.getenv("GENERATION_TOP_P", 0.95)),
+            presence_penalty=float(os.getenv("GENERATION_PRESENCE_PENALTY", 0.5)),
+            frequency_penalty=float(os.getenv("GENERATION_FREQUENCY_PENALTY", 0.5)),
+        )
+    
+    @property
+    def extraction(self) -> LLMTaskParams:
+        return LLMTaskParams(
+            max_tokens=int(os.getenv("EXTRACTION_MAX_TOKENS", 4096)),
+            temperature=float(os.getenv("EXTRACTION_TEMPERATURE", 0.3)),
+            top_p=float(os.getenv("EXTRACTION_TOP_P", 0.95)),
+            presence_penalty=float(os.getenv("EXTRACTION_PRESENCE_PENALTY", 0.5)),
+            frequency_penalty=float(os.getenv("EXTRACTION_FREQUENCY_PENALTY", 0.5)),
+        )
+    
+    class Config:
+        env_nested_delimiter = '_'
 
 class Neo4jConfig(BaseSettings):
     username: str = Field(..., alias="NEO4J_USERNAME")
@@ -52,6 +82,8 @@ class EmbeddingModelConfig(BaseSettings):
         alias="EMBEDDER_MODEL"
     )
 
+
+api_config = APIConfig()
 llm_config = LLMConfig()
 neo4j_config = Neo4jConfig()
 embed_config = EmbeddingModelConfig()
