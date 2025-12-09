@@ -6,9 +6,6 @@ from typing import List, Union
 
 
 class EntityPostprocessor:
-    def __init__(self):
-        pass
-
     def __call__(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         """Make the class callable for easy usage."""
         if isinstance(text, list):

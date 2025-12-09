@@ -4,14 +4,24 @@ from langchain_community.document_loaders import WikipediaLoader
 
 
 class DataLoader:
-    def __call__(self, wiki_query: str = "Elizabeth I", load_max_docs: int = 10) -> list:
-        return self.load(wiki_query, load_max_docs)
+    def __call__(self, documents: str = "Elizabeth I", load_max_docs: int = 10) -> list:
+        return self.load(documents, load_max_docs)
     
-    def load(self, wiki_query: str = "Elizabeth I", load_max_docs: int = 10) -> list:
-        if wiki_query is not None:
-            logger.info(f"Searching Wikipedia for: {wiki_query}")
+    def load(self, documents: str = "Elizabeth I", load_max_docs: int = 10) -> list:
+        """
+        Load documents from Wikipedia based on the query.
+        
+        Args:
+            documents (str): The search query for Wikipedia.
+            load_max_docs (int): Maximum number of documents to load.
+        Returns:
+            list: A list of documents with their content.
+        """
+        
+        if documents is not None:
+            logger.info(f"Searching Wikipedia for: {documents}")
             
-            loader = WikipediaLoader(query=wiki_query, load_max_docs=load_max_docs)
+            loader = WikipediaLoader(query=documents, load_max_docs=load_max_docs)
             documents = loader.load()
             docs = [
                 {
@@ -30,4 +40,3 @@ if __name__ == "__main__":
     
     with open("dump/elizabeth_i.json", "w", encoding="utf-8") as f:
         json.dump(documents, f, ensure_ascii=False, indent=4)
-

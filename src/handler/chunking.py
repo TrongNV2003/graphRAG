@@ -10,8 +10,7 @@ from src.config.schemas import ChunkType, StructuralChunk
 
 class TwoPhaseDocumentChunker:
     """
-    This module provides a service for chunking text using Rule-based methods from a long context.
-    Chunking according to the following rules:
+    Chunking text using Rule-based methods from a long context.
     Phase 1: Document-Structured Chunking (e.g.: "Chapter 1", "Chương 1", "I." v.v.).
     Phase 2: Fix-sized Chunking: Chunking with fixed sizes (e.g.: 2048 tokens).
 
@@ -21,6 +20,7 @@ class TwoPhaseDocumentChunker:
     Returns:
         output (list): List of chunking summerized context.
     """
+    
     def __init__(
         self, 
         chunk_size: int = 2048,
@@ -117,7 +117,6 @@ class TwoPhaseDocumentChunker:
         self.pattern_hierarchy = ['phan', 'chuong', 'uppercase_alphabetical', 'roman', 'muc', 'arabic', 'decimal', 'sub_decimal', 'alphabetical']
 
     def chunk_document(self, document: str, max_new_chunk_size: Optional[int] = None) -> List[StructuralChunk]:
-        logger.info("Starting document chunking")
         print("Phase 1: Structure-based chunking...") if self.verbose else None
         structural_chunks = self._phase1_structural_chunking(document, chunk_size=max_new_chunk_size)
 
