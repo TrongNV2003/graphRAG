@@ -1,4 +1,3 @@
-import os
 import json
 import argparse
 from loguru import logger
@@ -11,6 +10,7 @@ from langchain_neo4j import Neo4jGraph
 from src.config.schemas import StructuralChunk
 from src.processing.dataloaders import DataLoader
 from src.handler.storage import GraphStorage
+from src.handler.embed import EmbedStorage
 from src.handler.chunking import TwoPhaseDocumentChunker
 from src.engines.llm import EntityExtractionLLM
 from src.processing.preprocessing import EntityPostprocessor
@@ -22,8 +22,6 @@ class GraphIndexing:
         self.client = client
         self.graph_db = graph_db
         self.chunk_size = chunk_size
-        
-        self.wikiloader = DataLoader()
         
         self.chunker = TwoPhaseDocumentChunker(
             chunk_size=self.chunk_size,
@@ -41,6 +39,12 @@ class GraphIndexing:
         self.postprocessor = EntityPostprocessor()
         
         self.storage = GraphStorage(self.graph_db)
+        
+        self.embed_storage = EmbedStorage(
+            model_name=embed_config.embedder_model,
+            graph_db=self.graph_db,
+            label="Chunk",
+        )
 
     def _chunking(self, document: dict, max_new_chunk_size: Optional[int] = None) -> List['StructuralChunk']:
         chunks = self.chunker.chunk_document(document, max_new_chunk_size=max_new_chunk_size)
@@ -48,11 +52,12 @@ class GraphIndexing:
 
     def indexing(self, chunks: List['StructuralChunk'], clear_old_graph: bool = False) -> None:
         """Index pre-chunked data into the graph database."""
-        batch_size = 5
+        batch_size = 3
         all_nodes: List[Dict] = []
         all_relationships: List[Dict] = []
         batch_nodes: List[Dict] = []
         batch_relationships: List[Dict] = []
+        batch_chunks: List['StructuralChunk'] = []
         total_nodes_processed = 0
         total_relationships_processed = 0
         total_chunks = len(chunks)
@@ -97,6 +102,9 @@ class GraphIndexing:
             batch_nodes.extend(cleaned_nodes)
             batch_relationships.extend(cleaned_relationships)
             
+            # Prepare chunks for embedding storage
+            batch_chunks.append(chunk)
+            
             logger.info(f"Extracted chunk {i + 1}: {len(cleaned_nodes)} entities, {len(cleaned_relationships)} relationships")
 
             if (i + 1) % batch_size == 0 or (i + 1) == total_chunks:
@@ -114,10 +122,15 @@ class GraphIndexing:
                 
                 all_nodes.extend(dedup_nodes)
                 all_relationships.extend(dedup_relationships)
+
+                # Store embeddings for this batch of chunks
+                if batch_chunks:
+                    self.embed_storage.store_embeddings(batch_chunks)
                 
                 # Reset batch
                 batch_nodes = []
                 batch_relationships = []
+                batch_chunks = []
                 
         logger.info(f"Total nodes upserted: {total_nodes_processed}, Total relationships upserted: {total_relationships_processed}")
         return all_nodes, all_relationships
@@ -170,6 +183,8 @@ if __name__ == "__main__":
     parser.add_argument("--query", type=str, default="Elizabeth I", help="Search query or document identifier")
     parser.add_argument("--load_max_docs", type=int, default=10, help="Max docs to load from source")
     args = parser.parse_args()
+    
+    dataloader = DataLoader()
 
     client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
     
@@ -181,9 +196,10 @@ if __name__ == "__main__":
     
     graph_indexing = GraphIndexing(client=client, graph_db=graph_db, chunk_size=2048)
 
-    raw_docs = graph_indexing.wikiloader.load(args.query, load_max_docs=args.load_max_docs)
-    all_chunks: List[StructuralChunk] = []
+    raw_docs = dataloader.load(args.query, load_max_docs=args.load_max_docs)
+    
+    chunks: List[StructuralChunk] = []
     for doc in raw_docs:
-        all_chunks.extend(graph_indexing._chunking(doc["content"]))
+        chunks.extend(graph_indexing._chunking(doc["content"]))
 
-    graph_indexing.indexing(chunks=all_chunks, clear_old_graph=True)
+    graph_indexing.indexing(chunks=chunks, clear_old_graph=True)

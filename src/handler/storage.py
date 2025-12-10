@@ -1,4 +1,3 @@
-import re
 from loguru import logger
 from collections import defaultdict
 from langchain_neo4j import Neo4jGraph
@@ -136,7 +135,3 @@ class GraphStorage:
             self.graph_db.query("MATCH (n) DETACH DELETE n")
         except Exception as e:
             logger.error(f"Error clearing graph data: {e}")
-
-    # def _get_embedding(self, node: dict) -> list:
-    #     text = f"{node['id']} {node.get('role', '')}".strip()
-    #     return self.embedder.encode(text).tolist()
