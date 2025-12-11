@@ -5,12 +5,13 @@ from typing import List, Optional, Dict
 
 from openai import OpenAI
 from langchain_neo4j import Neo4jGraph
+from sentence_transformers import SentenceTransformer
+
 
 
 from src.config.schemas import StructuralChunk
 from src.processing.dataloaders import DataLoader
-from src.handler.storage import GraphStorage
-from src.handler.embed import EmbedStorage
+from src.handler.storage import GraphStorage, EmbedStorage
 from src.handler.chunking import TwoPhaseDocumentChunker
 from src.engines.llm import EntityExtractionLLM
 from src.processing.preprocessing import EntityPostprocessor
@@ -40,8 +41,9 @@ class GraphIndexing:
         
         self.storage = GraphStorage(self.graph_db)
         
+        self.embedding_model = SentenceTransformer(embed_config.embedder_model)
         self.embed_storage = EmbedStorage(
-            model_name=embed_config.embedder_model,
+            embedding_model=self.embedding_model,
             graph_db=self.graph_db,
             label="Chunk",
         )
@@ -58,8 +60,6 @@ class GraphIndexing:
         batch_nodes: List[Dict] = []
         batch_relationships: List[Dict] = []
         batch_chunks: List['StructuralChunk'] = []
-        total_nodes_processed = 0
-        total_relationships_processed = 0
         total_chunks = len(chunks)
         
         if clear_old_graph:
@@ -115,10 +115,7 @@ class GraphIndexing:
                     "nodes": dedup_nodes,
                     "relationships": dedup_relationships
                 }
-                self.storage.store(batch_graph_data)
-                
-                total_nodes_processed += len(batch_graph_data['nodes'])
-                total_relationships_processed += len(batch_graph_data['relationships'])
+                self.storage.store_graph(batch_graph_data)
                 
                 all_nodes.extend(dedup_nodes)
                 all_relationships.extend(dedup_relationships)
@@ -132,7 +129,13 @@ class GraphIndexing:
                 batch_relationships = []
                 batch_chunks = []
                 
-        logger.info(f"Total nodes upserted: {total_nodes_processed}, Total relationships upserted: {total_relationships_processed}")
+
+        entity_count = self.graph_db.query('MATCH (e:Entity) RETURN count(e) as count')[0]['count']
+        rel_count = self.graph_db.query('MATCH ()-[r]->() RETURN count(r) as count')[0]['count']
+        chunk_count = self.graph_db.query('MATCH (c:Chunk) RETURN count(c) as count')[0]['count']
+        
+        logger.info(f"Database Statistics - Total Entities: {entity_count}, Total Relationships: {rel_count}, Total Chunks: {chunk_count}")
+        
         return all_nodes, all_relationships
             
     def _deduplicate_entities(self, entities: List[Dict]) -> List[Dict]:
@@ -201,5 +204,5 @@ if __name__ == "__main__":
     chunks: List[StructuralChunk] = []
     for doc in raw_docs:
         chunks.extend(graph_indexing._chunking(doc["content"]))
-
+        
     graph_indexing.indexing(chunks=chunks, clear_old_graph=True)
