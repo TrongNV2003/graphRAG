@@ -36,7 +36,7 @@ class DataLoader:
 
 if __name__ == "__main__":
     loader = DataLoader()
-    documents = loader(wiki_query="Elizabeth I", load_max_docs=10)
+    documents = loader(documents="Elizabeth I", load_max_docs=10)
     
     with open("dump/elizabeth_i.json", "w", encoding="utf-8") as f:
         json.dump(documents, f, ensure_ascii=False, indent=4)
