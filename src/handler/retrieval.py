@@ -1,48 +1,87 @@
-import os
 from pathlib import Path
 from loguru import logger
-from typing import List, Dict, Optional
+from abc import ABC, abstractmethod
 from langchain_neo4j import Neo4jGraph
+from typing import List, Dict, Optional, Any
 
 from src.engines.search import HybridRetrievalEngine
 
 
-class GraphRetrieval:
-    """
-    Graph retrieval with nodes + relationships.
-    """
-
+class BaseRetrieval(ABC):
     def __init__(self, graph_db: Neo4jGraph):
         self.graph_db = graph_db
+        
+    @abstractmethod
+    def retrieve(self, **kwargs: Any) -> List[Dict]:
+        pass
 
-    def retrieve(self, query: str, limit: int = 10) -> List[Dict]:
-        # Exact match on id/role
-        cypher_exact = """
+
+class GraphRetrieval(BaseRetrieval):
+    """
+    Graph retrieval with nodes + relationships.
+    Args:
+        graph_db: Neo4jGraph instance
+        graph_limit: Maximum number of graph to retrieve
+    """
+    def __init__(self, graph_db: Neo4jGraph, graph_limit: int = 10):
+        super().__init__(graph_db)
+        self.graph_limit = graph_limit
+
+    def retrieve(self, target_entities: List[str], excluded_entities: Optional[List[str]] = None) -> List[Dict]:
+        """Retrieve relevant graph based on the entities list, excluding specified entities.
+        Args:
+            target_entities: List of entity names to search in graph DB
+            excluded_entities: List of entity names to exclude from results
+        Returns:
+            List of graph triples as dicts
+        """
+        if not target_entities:
+            return []
+        
+        excluded_entities = excluded_entities or []
+        
+        # Exclusion condition
+        exclusion_clause = ""
+        if excluded_entities:
+            exclusion_clause = """
+            AND NOT (toLower(n.id) IN $excluded OR toLower(n.entity_role) IN $excluded)
+            AND NOT (toLower(m.id) IN $excluded OR toLower(m.entity_role) IN $excluded)
+            """
+        
+        # Exact match on id/entity_role for any entity in the list
+        cypher_exact = f"""
+        UNWIND $entities as entity_name
         MATCH (n)
-        WHERE toLower(n.id) = toLower($q) OR toLower(n.role) = toLower($q)
+        WHERE (toLower(n.id) = toLower(entity_name) OR toLower(n.entity_role) = toLower(entity_name))
+        {exclusion_clause}
         MATCH (n)-[r]-(m)
+        WHERE 1=1 {exclusion_clause.replace('AND', '') if excluded_entities else ''}
         WITH DISTINCT n, r, m
-        RETURN { id: n.id, role: n.role, type: labels(n)[0] } AS source,
+        RETURN {{ id: n.id, entity_role: n.entity_role, type: labels(n)[0] }} AS source,
                type(r) AS relationship,
-               { id: m.id, role: m.role, type: labels(m)[0] } AS target
+               {{ id: m.id, entity_role: m.entity_role, type: labels(m)[0] }} AS target
         LIMIT $limit
         """
 
-        params = {"q": query, "limit": limit}
+        excluded_lower = [e.lower() for e in excluded_entities] if excluded_entities else []
+        params = {"entities": target_entities, "excluded": excluded_lower, "limit": self.graph_limit}
         results = self._query_graph(cypher_exact, params)
 
         if results:
             return results
 
-        # Fallback: substring match on id/role
-        cypher_contains = """
+        # Fallback: substring match on id/entity_role for any entity in the list
+        cypher_contains = f"""
+        UNWIND $entities as entity_name
         MATCH (n)
-        WHERE toLower(n.id) CONTAINS toLower($q) OR toLower(n.role) CONTAINS toLower($q)
+        WHERE (toLower(n.id) CONTAINS toLower(entity_name) OR toLower(n.entity_role) CONTAINS toLower(entity_name))
+        {exclusion_clause}
         MATCH (n)-[r]-(m)
+        WHERE 1=1 {exclusion_clause.replace('AND', '') if excluded_entities else ''}
         WITH DISTINCT n, r, m
-        RETURN { id: n.id, role: n.role, type: labels(n)[0] } AS source,
+        RETURN {{ id: n.id, entity_role: n.entity_role, type: labels(n)[0] }} AS source,
                type(r) AS relationship,
-               { id: m.id, role: m.role, type: labels(m)[0] } AS target
+               {{ id: m.id, entity_role: m.entity_role, type: labels(m)[0] }} AS target
         LIMIT $limit
         """
 
@@ -52,22 +91,28 @@ class GraphRetrieval:
         return self.graph_db.query(cypher, params=params or {})
 
 
-class EmbeddingRetrieval:
+class EmbeddingRetrieval(BaseRetrieval):
     """Chunk retrieval with Hybrid Search Engine (BM25 + dense).
     Args:
         graph_db: Neo4jGraph instance
         search_engine: Hybrid search engine
+        top_k: Maximum number of results to return
+        threshold: Minimum similarity score threshold
         auto_build: Whether to auto-load or build index on init
     """
     def __init__(
         self,
         graph_db: Neo4jGraph,
         search_engine: HybridRetrievalEngine,
+        top_k: int = 5,
+        threshold: float = 0,
         auto_build: bool = True,
     ):
-        self.graph_db = graph_db
+        super().__init__(graph_db)
         self.search_engine = search_engine
         self._index_built = False
+        self.top_k = top_k
+        self.threshold = threshold
         self.index_path = "data/hybrid_index"
         
         # Auto-load or build index
@@ -77,23 +122,16 @@ class EmbeddingRetrieval:
             else:
                 self._build_index()
     
-    def retrieve(
-        self,
-        query: str,
-        top_k: int = 5,
-        threshold: float = 0,
-    ) -> List[Dict]:
+    def retrieve(self, query: str) -> List[Dict]:
         """Retrieve relevant chunks with similarity threshold.
         
         Args:
             query: Search query text
-            top_k: Maximum number of results to return
-            threshold: Minimum similarity score threshold (default: 0.5)
             
         Returns:
             List of chunk dicts with scores >= threshold
         """
-        doc_ids, scores = self.search_engine.search(query, top_k=top_k, min_score=threshold)
+        doc_ids, scores = self.search_engine.search(query, top_k=self.top_k, min_score=self.threshold)
         results: List[Dict] = []
 
         for doc_id, score in zip(doc_ids, scores):
@@ -114,7 +152,7 @@ class EmbeddingRetrieval:
             )
 
         results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
-        return results[:top_k]
+        return results[:self.top_k]
 
     def _build_index(self, save: bool = True, force: bool = False) -> None:
         """Load chunks from Neo4j and build search index.
@@ -143,7 +181,6 @@ class EmbeddingRetrieval:
                 chunk_id = record.get("id")
                 content = record.get("content") or ""
                 
-                # Skip duplicates and empty content
                 if not content or chunk_id in seen_ids:
                     continue
                 
@@ -205,49 +242,46 @@ class HybridRetrieval:
     Args:
         graph_db: Neo4jGraph instance
         search_engine: Hybrid search engine
+        graph_limit: Maximum number of graph to retrieve
+        chunk_top_k: Maximum number of chunk results to return
+        chunk_threshold: Minimum similarity score threshold for chunks
         auto_build: Whether to auto-load or build index on init
     """
-
     def __init__(
         self,
         graph_db: Neo4jGraph,
         search_engine: HybridRetrievalEngine,
-        auto_build: bool = True,
-    ):
-        self.graph_retrieval = GraphRetrieval(graph_db)
-        self.embedding_retrieval = EmbeddingRetrieval(
-            graph_db, 
-            search_engine=search_engine,
-            auto_build=auto_build
-        )
-
-    def retrieve(
-        self,
-        query: str,
         graph_limit: int = 10,
         chunk_top_k: int = 10,
         chunk_threshold: float = 0.5,
-    ) -> Dict[str, List[Dict]]:
+        auto_build: bool = True,
+    ):
+        self.graph_retrieval = GraphRetrieval(graph_db = graph_db, graph_limit=graph_limit)
+        self.embedding_retrieval = EmbeddingRetrieval(
+            graph_db, 
+            search_engine=search_engine,
+            top_k=chunk_top_k,
+            threshold=chunk_threshold,
+            auto_build=auto_build
+        )
+
+    def retrieve(self, query: str, target_entities: List[str], excluded_entities: Optional[List[str]] = None) -> Dict[str, List[Dict]]:
         """Hybrid retrieval combining graph triples and semantic chunks.
         
         Args:
-            query: Search query text
-            graph_limit: Max number of graph triples to return
-            chunk_top_k: Max number of chunks to return
-            chunk_threshold: Minimum similarity score for chunks (default: 0.5)
+            target_entities: List of entity names for graph retrieval
+            query: Search query text for semantic chunk retrieval
+            excluded_entities: List of entity names to exclude from graph results
             
         Returns:
             Dict with 'graph' and 'chunks' keys
         """
-        graph_results = self.graph_retrieval.retrieve(query, limit=graph_limit)
-        chunk_results = self.embedding_retrieval.retrieve(
-            query, 
-            top_k=chunk_top_k, 
-            threshold=chunk_threshold
-        )
+        graph_results = self.graph_retrieval.retrieve(target_entities, excluded_entities)
+        chunk_results = self.embedding_retrieval.retrieve(query)
+        
         return {
             "graph": graph_results,
-            "chunks": chunk_results,
+            "chunk": chunk_results,
         }
 
 if __name__ == "__main__":
@@ -263,19 +297,21 @@ if __name__ == "__main__":
         "model_name": embed_config.embedder_model,
     })
     
-    retrieval = HybridRetrieval(graph_db, search_engine=search_engine, auto_build=True)
-
-    query = "Elizabeth"
-    results = retrieval.retrieve(
-        query, 
-        graph_limit=10, 
+    retrieval = HybridRetrieval(
+        graph_db,
+        search_engine=search_engine,
+        graph_limit=10,
         chunk_top_k=10,
-        chunk_threshold=0
+        chunk_threshold=0,
+        auto_build=True
     )
-
+    target_entities = ["Elizabeth"]
+    query = "Tell me about Elizabeth and her relationships."
+    results = retrieval.retrieve(query=query, target_entities=target_entities)
+    
     logger.info(f"Graph results: {len(results['graph'])}")
     logger.info(f"Chunk results: {len(results['chunks'])}")
-    print("Graph triples:", results["graph"])
+    print("Graph:", results["graph"][:3])
     print("\nChunks:")
-    for i, chunk in enumerate(results["chunks"], 1):
+    for i, chunk in enumerate(results["chunks"][:3], 1):
         print(f"  {i}. Score: {chunk['score']:.3f} | {chunk['chunk_text'][:100]}...")
