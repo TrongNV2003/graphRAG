@@ -1,60 +1,119 @@
-# GraphRAG
-GraphRAG implements a Retrieval-Augmented Generation (RAG) system using knowledge graphs. It extracts entities and relationships from text data (e.g., Wikipedia articles), embedding information with Sentence-Transformers, stores them in a Neo4j graph database, and provides visualization capabilities. This project is served for researchers and developers interested in NLP.
+# Hybrid Knowledge Graph RAG System
+A Retrieval-Augmented Generation (RAG) system that combines **Knowledge Graph** structured data with Native RAG (Hybrid Semantic Search over document chunks). This approach leverages the precision of graph relationships and the breadth of unstructured text to provide accurate, context-aware responses.
 
-- GraphRAG includes 3 main function:
-    + **Indexing**: Processing provided data and extract entities into nodes (with embeddings for retrieval) and relationships
-    + **Retrieval**: Retrieving with Vector search with model "all-MiniLM-L6-v2" from the knowledge graph to get relative information about provided data and response to user.
-    + **Visualization**: Visualizing these nodes and relationships into a knowledge graph in form of 2D and 3D
+## Overview
+HybridRAG solves the limitations of standalone vector search by integrating structured knowledge. The system extracts entities and relationships from text into a Neo4j graph while simultaneously maintaining a Hybrid Search Index (BM25 + Neo4j Dense Vector) for document chunks.
 
-## Features
-- **Dataloader**: Crawl text data from Wikipedia or load from pdf/json file.
-- **Entity and Relationship Extraction**: Utilize a LLM Qwen2.5-72B to extract structured data from unstructured text.
-- **Graph Storage**: Store extracted entities and relationships in a Neo4j database.
-- **Visualization**: Query and visualize the knowledge graph in 2D and 3D.
-- **Retrieval**: Using Vector search to retrieve from graph database, provide related information to LLM and response by Qwen2.5-72B 
+The retrieval pipeline uses a sophisticated strategy:
+- **Graph RAG**: Structured entity relationships from Neo4j
+- **Native RAG**: Uses Reciprocal Rank Fusion (RRF) to combine keyword search (BM25) and semantic search (Dense Vector).
+- **Query Analysis**: LLM-powered entity extraction and query normalization
+- **Smart Exclusion**: Handles queries like "Besides X, what else..." by excluding specific entities
+
+## Key Features
+### Hybrid Retrieval Architecture
+- **Dual-Mode Retrieval**: Combines graph triples and semantic chunks for comprehensive context
+- **BM25 + Dense Fusion**: Hybrid search using both lexical and semantic matching with Reciprocal Rank Fusion (RRF)
+- **Deduplication**: Prevents duplicate entities, relationships, and chunks across multiple indexing runs
+
+### Query Processing
+- **Query Analysis**: Extracts target entities and excluded entities from user queries
+- **Query Normalization**: Converts user queries into optimized search terms for better retrieval
+
+### Visualization
+- **Interactive Knowledge Graph**: Visualize entities and relationships
+
+## System Workflow
+![HybridRag](assets/hybrid-rag.png)
 
 ## Installation
-1. **Requirements**:
-    ```sh
-    conda create -n graphrag python==3.11
-    poetry install
+
+### Prerequisites
+- Python 3.11+
+- Neo4j Database (local or remote)
+- OpenAI-compatible API endpoint
+
+### Installation
+1. **Create Environment**:
+   ```bash
+   conda create -n graphrag python=3.11.11
+   conda activate graphrag
+   ```
+
+2. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure Settings**:
+    ```bash
+    cp .env.example .env
+    # Edit .env with your settings
     ```
 
-2. **Execution**:
-    - **Indexing**
-    Extract Entities and Relationships, then store in Neo4j:
-    ```sh
-    bash scripts/indexing.sh
-    ```
+## Usage
 
-    - **Retrieval**
-    Retrieval related information from query and response by LLM: 
-    ```sh
-    bash scripts/retrieval.sh
-    ```
+### 1. Indexing (Extract & Store)
 
-    - **Visualization**
-    Visualization Nodes and Relationships from Neo4j into Graph:
-    ```sh
-    bash scripts/visualization.sh
-    ```
+Extract entities and relationships from documents, then store in Neo4j:
 
-3. **Note**:
-    - If input is JSON, then format must be like this form, else it will crawl data from wikipedia:
-    ```json
-    [
-        {
-            "page_content": "context",
-            "metadata": {
-                "abc": "xyz",
-    
-            }
-        }
-    ]
-    ```
+```bash
+python main.py --indexing --query_keyword "Elizabeth I" --load_max_docs 10
+```
 
-## Future plans
-- Multiple inputs: json, pdf, wikipedia crawl. ("Done")
-- Visualize Graph in form of 2D, 3D...  ("Done")
-- Module Retrieval LLM: Retrieval by keyword or query of user ("Done")
-- Further improvement of logic processing with input is the question of User -> use Retrieval model to retrieve related data -> Output is List schemas for LLM and query for LLM response (Done)
+### 2. Querying (Retrieve & Generate)
+
+Query the knowledge graph with natural language:
+
+```bash
+python main.py --querying "Tell me about Elizabeth and her relationships"
+```
+
+### 3. Visualization
+
+Visualize the knowledge graph in an interactive HTML file:
+
+```bash
+python main.py --visualizing
+```
+
+Opens `graph.html` showing entities as nodes and relationships as edges.
+
+
+## Technical Details
+
+### Deduplication Strategy
+
+**Database Level**:
+- `Entity.id` uniqueness constraint
+- `Chunk.id` uniqueness constraint
+- MERGE operations for idempotent upserts
+
+**Index Level**:
+- Deduplicates chunks by ID when building FAISS/BM25 indexes
+- Prevents duplicate documents in search results
+
+### Hybrid Search
+
+**BM25 (Lexical)**:
+- Token-based matching
+- Good for exact keyword matches
+
+**Dense (Semantic)**:
+- Sentence embeddings with cosine similarity
+- Captures semantic meaning
+
+**RRF Fusion**:
+- Combines scores from both methods
+- Reciprocal Rank Fusion for balanced results
+
+### Model Configuration
+
+**Embedding Models**:
+- Vietnamese: `hiieu/halong_embedding`
+- English: `sentence-transformers/all-MiniLM-L6-v2`
+
+**LLM**:
+- Model (Self-hosted): `Qwen3-4B`
+- Extraction: Structured output with JSON schema
+- Response: Context-aware synthesis
