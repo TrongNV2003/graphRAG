@@ -5,6 +5,7 @@ from langchain_neo4j import Neo4jGraph
 from typing import Any, Dict, List, Optional, Union
 from sentence_transformers import SentenceTransformer
 
+from src.config.setting import embed_config
 
 class GraphStorage:
     """
@@ -148,9 +149,9 @@ class EmbedStorage:
     """
     EmbedStorage handles embedding and storing chunks into a Neo4j graph database.
     """
-    def __init__(self, embedding_model: SentenceTransformer, graph_db: Neo4jGraph, label: str = "Chunk"):
+    def __init__(self, graph_db: Neo4jGraph, label: str = "Chunk"):
         self.graph_db = graph_db
-        self.embedder = embedding_model
+        self.embedder = SentenceTransformer(embed_config.embedder_model)
         self.label = label # Label node cho các chunk embeddings
         self.__setup_schema()
     

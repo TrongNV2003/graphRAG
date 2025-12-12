@@ -1,28 +1,31 @@
-import json
 import argparse
 from loguru import logger
 from typing import List, Optional, Dict
 
 from openai import OpenAI
 from langchain_neo4j import Neo4jGraph
-from sentence_transformers import SentenceTransformer
-
-
 
 from src.config.schemas import StructuralChunk
-from src.processing.dataloaders import DataLoader
-from src.handler.storage import GraphStorage, EmbedStorage
-from src.handler.chunking import TwoPhaseDocumentChunker
 from src.engines.llm import EntityExtractionLLM
+from src.processing.dataloaders import DataLoader
+from src.handler.chunking import TwoPhaseDocumentChunker
+from src.handler.storage import GraphStorage, EmbedStorage
 from src.processing.preprocessing import EntityPostprocessor
-from src.config.setting import api_config, llm_config, neo4j_config, embed_config
+from src.config.setting import api_config, llm_config, neo4j_config
 from src.prompts.ner import EXTRACT_SYSTEM_PROMPT, EXTRACT_PROMPT_TEMPLATE, EXTRACT_SCHEMA
 
 class GraphIndexing:
-    def __init__(self, client: OpenAI, graph_db: Neo4jGraph, chunk_size: int = 2048):
+    def __init__(
+        self,
+        client: OpenAI,
+        graph_db: Neo4jGraph,
+        chunk_size: int = 2048,
+        clear_old_graph: bool = False
+    ):
         self.client = client
         self.graph_db = graph_db
         self.chunk_size = chunk_size
+        self.clear_old_graph = clear_old_graph
         
         self.chunker = TwoPhaseDocumentChunker(
             chunk_size=self.chunk_size,
@@ -41,18 +44,16 @@ class GraphIndexing:
         
         self.storage = GraphStorage(self.graph_db)
         
-        self.embedding_model = SentenceTransformer(embed_config.embedder_model)
         self.embed_storage = EmbedStorage(
-            embedding_model=self.embedding_model,
             graph_db=self.graph_db,
             label="Chunk",
         )
 
-    def _chunking(self, document: dict, max_new_chunk_size: Optional[int] = None) -> List['StructuralChunk']:
+    def chunking(self, document: dict, max_new_chunk_size: Optional[int] = None) -> List['StructuralChunk']:
         chunks = self.chunker.chunk_document(document, max_new_chunk_size=max_new_chunk_size)
         return chunks
 
-    def indexing(self, chunks: List['StructuralChunk'], clear_old_graph: bool = False) -> None:
+    def indexing(self, chunks: List['StructuralChunk']) -> None:
         """Index pre-chunked data into the graph database."""
         batch_size = 3
         all_nodes: List[Dict] = []
@@ -62,7 +63,7 @@ class GraphIndexing:
         batch_chunks: List['StructuralChunk'] = []
         total_chunks = len(chunks)
         
-        if clear_old_graph:
+        if self.clear_old_graph:
             logger.info("Clearing existing graph data")
             self.storage.clear_all()
 
@@ -197,12 +198,17 @@ if __name__ == "__main__":
         password=neo4j_config.password
     )
     
-    graph_indexing = GraphIndexing(client=client, graph_db=graph_db, chunk_size=2048)
+    graph_indexing = GraphIndexing(
+        client,
+        graph_db=graph_db,
+        chunk_size=2048,
+        clear_old_graph=True
+    )
 
     raw_docs = dataloader.load(args.query, load_max_docs=args.load_max_docs)
     
     chunks: List[StructuralChunk] = []
     for doc in raw_docs:
-        chunks.extend(graph_indexing._chunking(doc["content"]))
+        chunks.extend(graph_indexing.chunking(doc["content"]))
         
-    graph_indexing.indexing(chunks=chunks, clear_old_graph=True)
+    graph_indexing.indexing(chunks=chunks)
