@@ -47,9 +47,9 @@ class EntityExtractionLLM(BaseLLM):
     def __init__(
         self,
         prompt_template: str,
-        client: Optional[OpenAI] = None,
         system_prompt: Optional[str] = None,
         json_schema: Optional[dict] = None,
+        client: Optional[OpenAI] = None,
     ) -> None:
         if client is None:
             client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
@@ -104,8 +104,8 @@ class GenerationResponseLLM(BaseLLM):
     def __init__(
         self,
         prompt_template: str,
-        client: Optional[OpenAI] = None,
         system_prompt: Optional[str] = None,
+        client: Optional[OpenAI] = None,
     ) -> None:
         if client is None:
             client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
@@ -127,6 +127,48 @@ class GenerationResponseLLM(BaseLLM):
                     {"role": Role.USER.value, "content": prompt_str},
                 ],
                 response_format={"type": "json_object"},
+                **generation_params
+            )
+            content = response.choices[0].message.content
+            
+            return content
+        
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {str(e)}")
+            raise e
+        
+class AnalysisQueryLLM(BaseLLM):
+    def __init__(
+        self,
+        prompt_template: str,
+        system_prompt: Optional[str] = None,
+        client: Optional[OpenAI] = None,
+        json_schema: Optional[dict] = None,
+    ) -> None:
+        if client is None:
+            client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
+
+        super().__init__(client, prompt_template, system_prompt)
+        self.json_schema = json_schema
+
+    def call(self, **kwargs: Any) -> dict:
+        prompt_str = self._inject_prompt(**kwargs)
+        
+        try:
+            generation_params = llm_config.generation.model_dump()
+            
+            response = self.client.chat.completions.create(
+                seed=llm_config.seed,
+                stop=llm_config.stop_tokens,
+                model=llm_config.llm_model,
+                messages=[
+                    {"role": Role.SYSTEM.value, "content": self.system_prompt},
+                    {"role": Role.USER.value, "content": prompt_str},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": self.json_schema
+                },
                 **generation_params
             )
             content = response.choices[0].message.content
