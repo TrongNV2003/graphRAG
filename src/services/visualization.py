@@ -1,231 +1,170 @@
-import os
-import sys
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
-
-import argparse
-import numpy as np
+import tempfile
+import hashlib
 from loguru import logger
-from typing import Literal
 from pyvis.network import Network
-import plotly.graph_objects as go
 from langchain_neo4j import Neo4jGraph
 
-from src.config.setting import neo4j_config
-from src.prompt.ner import GET_RELATIONSHIPS_CYPHER, GET_NODE_RELATIONSHIPS_CYPHER
 
-class GraphVisualizer:
-    def __init__(self):
-        self.graph = Neo4jGraph(
-            url=neo4j_config.url,
-            username=neo4j_config.username,
-            password=neo4j_config.password
-        )
+def _generate_color_from_category(category: str) -> str:
+    """
+    Generate a consistent color for a category using hash-based color generation.
+    Same category always gets the same color.
+    
+    Args:
+        category: Entity category name
+        
+    Returns:
+        Hex color string (e.g., "#FF5733")
+    """
+    hash_value = int(hashlib.md5(category.encode()).hexdigest(), 16)
+    
+    # Generate HSL color with:
+    # - Hue: 0-360
+    # - Saturation: 60-80%
+    # - Lightness: 45-65%
+    
+    hue = hash_value % 360
+    saturation = 60 + (hash_value % 20)
+    lightness = 45 + (hash_value % 20)
+    
+    # Convert HSL to RGB
+    def hsl_to_rgb(h, s, l):
+        s /= 100
+        l /= 100
+        c = (1 - abs(2 * l - 1)) * s
+        x = c * (1 - abs((h / 60) % 2 - 1))
+        m = l - c / 2
+        
+        if 0 <= h < 60:
+            r, g, b = c, x, 0
+        elif 60 <= h < 120:
+            r, g, b = x, c, 0
+        elif 120 <= h < 180:
+            r, g, b = 0, c, x
+        elif 180 <= h < 240:
+            r, g, b = 0, x, c
+        elif 240 <= h < 300:
+            r, g, b = x, 0, c
+        else:
+            r, g, b = c, 0, x
+        
+        r = int((r + m) * 255)
+        g = int((g + m) * 255)
+        b = int((b + m) * 255)
+        
+        return f"#{r:02X}{g:02X}{b:02X}"
+    
+    return hsl_to_rgb(hue, saturation, lightness)
 
-    def _query_graph(self, query: str, limit: int = 25) -> list:
-        """Truy vấn Neo4j và trả về danh sách kết quả."""
-        full_query = f"{query} LIMIT {limit}"
-        results = self.graph.query(full_query)
-        return results
 
-    def print_relationships(self, limit: int = 10):
-        """
-            Tìm tất cả các cặp node từ node source có mối quan hệ có hướng trong đồ thị.
-               (node n)     relationship     (node m)
-            (node source) ---------------> (node target)
-        """
-
-        relationships_cypher = """
-            MATCH (n)-[r]->(m)
-            RETURN n.id AS source, type(r) AS relationship, m.id AS target
-        """
-
-        results = self._query_graph(query=relationships_cypher, limit=limit)
-        logger.info(f"Showing {len(results)} relationships from Neo4j:")
-        for record in results:
-            print(f"{record['source']} -[{record['relationship']}]-> {record['target']}")
-
-    def visualize_graph_3d(self, limit: int = 25, output_file: str = "graph.html"):
-        """
-            Lấy tất cả các cặp node từ node source có mối quan hệ có hướng trong đồ thị.
-               (node n)     relationship     (node m)
-            (node source) ---------------> (node target)
-        """
-        get_node_relationships_cypher = """
-            MATCH (n)-[r]->(m)
-            RETURN n.id AS source_id, n.name AS source_name, type(r) AS rel_type,
-                    m.id AS target_id, m.name AS target_name, labels(n) AS source_labels, labels(m) AS target_labels
-        """
-
-        results = self._query_graph(query=get_node_relationships_cypher, limit=limit)
-
-        nodes = set()
-        for record in results:
-            nodes.add((record["source_id"], record["source_labels"][0]))
-            nodes.add((record["target_id"], record["target_labels"][0]))
-        nodes = list(nodes)
-
-        np.random.seed(42)
-        x_nodes = np.random.uniform(0, 10, len(nodes))
-        y_nodes = np.random.uniform(0, 10, len(nodes))
-        z_nodes = np.random.uniform(0, 10, len(nodes))
-
-        node_map = {node[0]: i for i, node in enumerate(nodes)}
-
-        type_colors = {
-            "PERSON": "#FF6B6B",
-            "PLACE": "#4ECDC4",
-            "TIME_PERIOD": "#FFD93D",
-            "EVENT": "#95E1D3",
-            "ORGANIZATION": "#F7C8E0",
-            "CONCEPT": "#B9BBDF",
-            "OBJECT": "#FF9F1C"
-        }
-
-        # Tạo danh sách node
-        node_traces = []
-        for i, (node_id, node_type) in enumerate(nodes):
-            trace = go.Scatter3d(
-                x=[x_nodes[i]], y=[y_nodes[i]], z=[z_nodes[i]],
-                mode="markers+text",
-                name=node_type,
-                marker=dict(
-                    size=10,
-                    color=type_colors.get(node_type, "white"),
-                    line=dict(width=1, color="black")
-                ),
-                text=[node_id],
-                textposition="middle center",
-                hoverinfo="text",
-                hovertext=f"ID: {node_id}<br>Type: {node_type}"
-            )
-            node_traces.append(trace)
-
-        # Tạo danh sách edge
-        edge_x, edge_y, edge_z = [], [], []
-        for record in results:
-            source_idx = node_map[record["source_id"]]
-            target_idx = node_map[record["target_id"]]
-            edge_x.extend([x_nodes[source_idx], x_nodes[target_idx], None])
-            edge_y.extend([y_nodes[source_idx], y_nodes[target_idx], None])
-            edge_z.extend([z_nodes[source_idx], z_nodes[target_idx], None])
-
-        edge_trace = go.Scatter3d(
-            x=edge_x, y=edge_y, z=edge_z,
-            mode="lines",
-            line=dict(width=2, color="gray"),
-            hoverinfo="none"
-        )
-
-        # Layout
-        layout = go.Layout(
-            title="3D Graph Visualization",
-            showlegend=True,
-            scene=dict(
-                xaxis=dict(title="X", backgroundcolor="black", gridcolor="gray", showbackground=True),
-                yaxis=dict(title="Y", backgroundcolor="black", gridcolor="gray", showbackground=True),
-                zaxis=dict(title="Z", backgroundcolor="black", gridcolor="gray", showbackground=True),
-                bgcolor="black"
-            ),
-            paper_bgcolor="black",
-            plot_bgcolor="black",
-            width=1500,
-            height=800,
-            margin=dict(l=0, r=0, b=0, t=40)
-        )
-
-        fig = go.Figure(data=[edge_trace] + node_traces, layout=layout)
-        fig.write_html(output_file)
-        logger.info(f"3D graph visualization saved to {output_file}")
-
-    def visualize_graph_2d(self, limit: int = 25, output_file: str = "graph.html"):
-        """
-            Lấy tất cả các cặp node từ node source có mối quan hệ có hướng trong đồ thị.
-               (node n)     relationship     (node m)
-            (node source) ---------------> (node target)
+def visualize_knowledge_graph(graph_db: Neo4jGraph, limit: int = 100):
+    """Create interactive knowledge graph from Neo4j"""
+    try:
+        query = """
+            MATCH (n:Entity)-[r]->(m:Entity)
+            RETURN n.id AS source_id, n.entity_category AS source_category, 
+                   n.value AS source_value, n.unit AS source_unit,
+                   type(r) AS rel_type,
+                   m.id AS target_id, m.entity_category AS target_category, 
+                   m.value AS target_value, m.unit AS target_unit
+            LIMIT $limit
         """
         
-        get_node_relationships_cypher = """
-            MATCH (n)-[r]->(m)
-            RETURN n.id AS source_id, n.name AS source_name, type(r) AS rel_type,
-                    m.id AS target_id, m.name AS target_name, labels(n) AS source_labels, labels(m) AS target_labels
-        """
-
-        results = self._query_graph(query=get_node_relationships_cypher, limit=limit)
-
+        results = graph_db.query(query, params={"limit": limit})
+        
+        if not results:
+            return None
+        
         net = Network(
-            notebook=True,
-            directed=True,
-            height="900px",
+            height="800px",
             width="100%",
-            bgcolor="#1a1a1a",
+            bgcolor="#1a1a2e",
             font_color="white",
-            cdn_resources="remote"
+            directed=True
         )
         
         net.force_atlas_2based(
-            gravity=-50,
+            gravity=-100,
             central_gravity=0.01,
-            spring_length=100,
-            spring_strength=0.08,
+            spring_length=200,
+            spring_strength=0.1,
             damping=0.4,
             overlap=0
         )
-
-        type_colors = {
-            "PERSON": "#FF6B6B",
-            "PLACE": "#4ECDC4",
-            "TIME_PERIOD": "#FFD93D",
-            "EVENT": "#95E1D3",
-            "ORGANIZATION": "#F7C8E0",
-            "CONCEPT": "#B9BBDF",
-            "OBJECT": "#FF9F1C"
-        }
-
+        
+        # Cache for generated colors to ensure consistency
+        color_cache = {}
+        
+        def get_category_color(category: str) -> str:
+            """Get color for category, using cache for consistency"""
+            if category not in color_cache:
+                color_cache[category] = _generate_color_from_category(category)
+            return color_cache[category]
+        
         for record in results:
             source_id = record["source_id"]
             target_id = record["target_id"]
-            source_label = record["source_labels"][0]
-            target_label = record["target_labels"][0]
+            source_category = record["source_category"] or "Unknown"
+            target_category = record["target_category"] or "Unknown"
+            source_value = record["source_value"]
+            source_unit = record["source_unit"] or ""
+            target_value = record["target_value"]
+            target_unit = record["target_unit"] or ""
             rel_type = record["rel_type"]
             
+            source_hover = f"{source_id}<br>Category: {source_category}"
+            if source_value is not None:
+                source_hover += f"<br>Value: {source_value} {source_unit}"
+            
+            target_hover = f"{target_id}<br>Category: {target_category}"
+            if target_value is not None:
+                target_hover += f"<br>Value: {target_value} {target_unit}"
+            
+            # Add nodes
             net.add_node(
                 source_id,
-                label=source_id,
-                title=f"Type: {source_label}",
-                color=type_colors.get(source_label, "#FFFFFF"),
-                size=15,
+                label=source_id[:25] + "..." if len(source_id) > 25 else source_id,
+                title=source_hover,
+                color=get_category_color(source_category),
+                size=20,
                 shape="dot",
                 font={"size": 14, "face": "arial"}
             )
-
-            # Thêm node đích
+            
             net.add_node(
                 target_id,
-                label=target_id,
-                title=f"Type: {target_label}",
-                color=type_colors.get(target_label, "#FFFFFF"),
-                size=15,
+                label=target_id[:25] + "..." if len(target_id) > 25 else target_id,
+                title=target_hover,
+                color=get_category_color(target_category),
+                size=20,
                 shape="dot",
                 font={"size": 14, "face": "arial"}
             )
-
-            # Thêm edge
+            
+            # Add edge
             net.add_edge(
                 source_id,
                 target_id,
-                label=rel_type,
                 title=rel_type,
+                label=rel_type,
                 color="#848484",
                 width=1.5,
-                font={"size": 12, "align": "middle"}
+                font={"size": 10, "align": "middle", "vadjust": -5}
             )
-
+        
         net.set_options("""
         {
             "physics": {
                 "enabled": true,
+                "forceAtlas2Based": {
+                    "gravitationalConstant": -100,
+                    "centralGravity": 0.01,
+                    "springLength": 200,
+                    "springConstant": 0.1,
+                    "damping": 0.4,
+                    "avoidOverlap": 0.5
+                },
+                "solver": "forceAtlas2Based",
                 "stabilization": {
                     "enabled": true,
                     "iterations": 1000
@@ -262,24 +201,100 @@ class GraphVisualizer:
             }
         }
         """)
-
-        net.show(output_file)
-        logger.info(f"Graph visualization saved to {output_file}")
-
-    def visualize_graph(self, limit: int = 500, visualize_type: Literal["2d", "3d"] = "2d"):
-        if visualize_type == "2d":
-            self.visualize_graph_2d(limit=limit, output_file=f"graph_{visualize_type}.html")
-        elif visualize_type == "3d":
-            self.visualize_graph_3d(limit=limit, output_file=f"graph_{visualize_type}.html")
-        else:
-            raise ValueError(f"Invalid visualize_type: {visualize_type}. Must be visualize in '2d' or '3d'.")
+        
+        html_file = tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode='w', encoding='utf-8')
+        net.save_graph(html_file.name)
+        html_file.close()
+        
+        with open(html_file.name, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Inject CSS to remove margins, padding, and white background
+        custom_css = """
+        <style>
+            * {
+                margin: 0 !important;
+                padding: 0 !important;
+                box-sizing: border-box !important;
+            }
+            
+            body {
+                margin: 0 !important;
+                padding: 0 !important;
+                background-color: #1a1a2e !important;
+                overflow: hidden !important;
+            }
+            
+            html {
+                margin: 0 !important;
+                padding: 0 !important;
+                background-color: #1a1a2e !important;
+            }
+            
+            #mynetwork {
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                outline: none !important;
+                box-shadow: none !important;
+                background-color: #1a1a2e !important;
+                width: 100% !important;
+                height: 800px !important;
+            }
+            
+            canvas {
+                border: none !important;
+                outline: none !important;
+                display: block !important;
+            }
+            
+            .vis-network {
+                border: none !important;
+                outline: none !important;
+            }
+            
+            /* Remove Bootstrap card styling */
+            .card {
+                border: none !important;
+                background-color: transparent !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            
+            .card-body {
+                border: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            
+            /* Hide any headers */
+            center, h1 {
+                display: none !important;
+            }
+        </style>
+        """
+        
+        html_content = html_content.replace('</head>', custom_css + '</head>')
+        
+        with open(html_file.name, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        return html_file.name
+        
+    except Exception as e:
+        logger.error(f"Error creating Neo4j visualization: {e}")
+        return None
 
 if __name__ == "__main__":
-    visualizer = GraphVisualizer()
-
-    parser = argparse.ArgumentParser(description="Visualize Neo4j graph data")
-    parser.add_argument("--limit", type=int, default=500, help="Number of relationships to visualize")
-    parser.add_argument("--visualize_type", type=str, default="2d", help="Type of visualization: 2d or 3d")
-    args = parser.parse_args()
+    from src.config.setting import neo4j_config
     
-    visualizer.visualize_graph(limit=args.limit, visualize_type=args.visualize_type)
+    graph_db = Neo4jGraph(
+        url=neo4j_config.url,
+        username=neo4j_config.username,
+        password=neo4j_config.password
+    )
+    html_path = visualize_knowledge_graph(graph_db, limit=50)
+    if html_path:
+        logger.info(f"Knowledge graph visualization saved to: {html_path}")
+    else:
+        logger.error("Failed to create knowledge graph visualization.")
