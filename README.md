@@ -79,6 +79,13 @@ python main.py --visualizing
 
 Opens `graph.html` showing entities as nodes and relationships as edges.
 
+### Using with UI
+
+Running RAG system with UI:
+
+```bash
+python -m streamlit run src/ui/app.py
+```
 
 ## Technical Details
 
