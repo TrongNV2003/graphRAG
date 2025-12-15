@@ -62,11 +62,9 @@ def visualize_knowledge_graph(graph_db: Neo4jGraph, limit: int = 100):
     try:
         query = """
             MATCH (n:Entity)-[r]->(m:Entity)
-            RETURN n.id AS source_id, n.entity_category AS source_category, 
-                   n.value AS source_value, n.unit AS source_unit,
+            RETURN n.id AS source_id, n.entity_type AS source_type, n.entity_role AS source_role,
                    type(r) AS rel_type,
-                   m.id AS target_id, m.entity_category AS target_category, 
-                   m.value AS target_value, m.unit AS target_unit
+                   m.id AS target_id, m.entity_type AS target_type, m.entity_role AS target_role
             LIMIT $limit
         """
         
@@ -104,21 +102,19 @@ def visualize_knowledge_graph(graph_db: Neo4jGraph, limit: int = 100):
         for record in results:
             source_id = record["source_id"]
             target_id = record["target_id"]
-            source_category = record["source_category"] or "Unknown"
-            target_category = record["target_category"] or "Unknown"
-            source_value = record["source_value"]
-            source_unit = record["source_unit"] or ""
-            target_value = record["target_value"]
-            target_unit = record["target_unit"] or ""
+            source_category = record.get("source_type") or "Unknown"
+            target_category = record.get("target_type") or "Unknown"
+            source_role = record.get("source_role")
+            target_role = record.get("target_role")
             rel_type = record["rel_type"]
             
-            source_hover = f"{source_id}<br>Category: {source_category}"
-            if source_value is not None:
-                source_hover += f"<br>Value: {source_value} {source_unit}"
+            source_hover = f"{source_id}<br>Type: {source_category}"
+            if source_role:
+                source_hover += f"<br>Role: {source_role}"
             
-            target_hover = f"{target_id}<br>Category: {target_category}"
-            if target_value is not None:
-                target_hover += f"<br>Value: {target_value} {target_unit}"
+            target_hover = f"{target_id}<br>Type: {target_category}"
+            if target_role:
+                target_hover += f"<br>Role: {target_role}"
             
             # Add nodes
             net.add_node(
