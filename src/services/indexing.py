@@ -1,18 +1,16 @@
-import argparse
+from openai import OpenAI
 from loguru import logger
 from typing import List, Optional, Dict
-
-from openai import OpenAI
 from langchain_neo4j import Neo4jGraph
 
-from src.config.schemas import StructuralChunk
+from src.config.dataclass import StructuralChunk
 from src.engines.llm import EntityExtractionLLM
-from src.processing.dataloaders import DataLoader
 from src.processing.chunking import TwoPhaseDocumentChunker
 from src.core.storage import GraphStorage, QdrantEmbedStorage
 from src.processing.postprocessing import EntityPostprocessor
-from src.config.setting import api_config, llm_config, neo4j_config
 from src.prompts.ner_prompt import EXTRACT_SYSTEM_PROMPT, EXTRACT_PROMPT_TEMPLATE, EXTRACT_SCHEMA
+from src.config.setting import llm_config
+
 
 class GraphIndexing:
     def __init__(
@@ -44,7 +42,6 @@ class GraphIndexing:
         
         self.storage = GraphStorage(self.graph_db)
         
-        # Qdrant storage for hybrid search (chunk embeddings)
         self.qdrant_storage = QdrantEmbedStorage()
 
     def chunking(self, document: dict, max_new_chunk_size: Optional[int] = None) -> List['StructuralChunk']:
@@ -68,7 +65,6 @@ class GraphIndexing:
         for i, chunk in enumerate(chunks):
             text = getattr(chunk, "content", None) or chunk.get("content", "")
             if not text:
-                logger.warning(f"Skipping empty chunk at index {i}")
                 continue
 
             logger.info(f"Processing chunk {i + 1}/{total_chunks}")
@@ -146,8 +142,10 @@ class GraphIndexing:
             entity_id = entity.get('id', '').strip()
             entity_type = entity.get('entity_type', '').strip()
             entity_role = entity.get('entity_role', '').strip()
+            
             if not entity_id:
                 continue
+            
             key = (entity_id, entity_type, entity_role)
             if key not in seen:
                 seen.add(key)
@@ -179,34 +177,3 @@ class GraphIndexing:
                 logger.debug(f"Duplicate relationship found and removed: source='{source}', target='{target}', type='{rel_type}'")
         
         return deduplicated
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GraphRAG indexing pipeline")
-    parser.add_argument("--query", type=str, default="Elizabeth I", help="Search query or document identifier")
-    parser.add_argument("--load_max_docs", type=int, default=10, help="Max docs to load from source")
-    args = parser.parse_args()
-    
-    dataloader = DataLoader()
-
-    client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
-    
-    graph_db = Neo4jGraph(
-        url=neo4j_config.url,
-        username=neo4j_config.username,
-        password=neo4j_config.password
-    )
-    
-    graph_indexing = GraphIndexing(
-        client,
-        graph_db=graph_db,
-        chunk_size=2048,
-        clear_old_graph=True
-    )
-
-    raw_docs = dataloader.load(args.query, load_max_docs=args.load_max_docs)
-    
-    chunks: List[StructuralChunk] = []
-    for doc in raw_docs:
-        chunks.extend(graph_indexing.chunking(doc["content"]))
-        
-    graph_indexing.indexing(chunks=chunks)

@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings
 
 load_dotenv(override=True)
 
+
 class APIConfig(BaseSettings):
     base_url: Optional[str] = Field(
         default=None,
@@ -118,8 +119,18 @@ class QdrantConfig(BaseSettings):
     )
 
 
+class RetrievalConfig(BaseSettings):
+    """Configuration Fuzzy retrieval"""
+    fuzzy_min_score: float = Field(
+        default=0.5,
+        description="Minimum score threshold for fuzzy fulltext search (0.0-1.0)",
+        alias="FUZZY_MIN_SCORE"
+    )
+
+
 api_config = APIConfig()
 llm_config = LLMConfig()
 neo4j_config = Neo4jConfig()
 embed_config = EmbeddingModelConfig()
 qdrant_config = QdrantConfig()
+retrieval_config = RetrievalConfig()

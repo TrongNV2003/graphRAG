@@ -5,7 +5,8 @@ from typing import List, Dict, Optional, Tuple
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.config.setting import llm_config
-from src.config.schemas import ChunkType, StructuralChunk
+from src.config.datatype import ChunkType
+from src.config.dataclass import StructuralChunk
 
 
 class TwoPhaseDocumentChunker:
@@ -32,12 +33,9 @@ class TwoPhaseDocumentChunker:
         self.chunk_overlap = chunk_overlap
         self.verbose = verbose
         
-        # Determine tokenizer model
         model_name = tokenize_model or llm_config.llm_model
         
-        # Use tiktoken for OpenAI models, fallback to gpt2 for compatibility
         if model_name.lower().startswith(("gpt-", "o1-", "openai/")):
-            # OpenAI models: use gpt2 tokenizer as proxy (similar tokenization)
             self.tokenizer = AutoTokenizer.from_pretrained("gpt2", use_fast=True)
             logger.info(f"Using gpt2 tokenizer as proxy for OpenAI model: {model_name}")
         else:
@@ -82,17 +80,18 @@ class TwoPhaseDocumentChunker:
                 r'^\s*[Mm][ỤỤụu][Cc]\s+(\d+)\.\s+(.+)$',     # MỤC 1. Title, MỤC 2. Title
                 r'^\s*[Mm][ỤỤụu][Cc]\s+(\d+)\)\s+(.+)$',     # MỤC 1) Title, MỤC 2) Title
             ],
-            'arabic': [
-                r'^\s*(\d+)\.\s+(.+)$',           # 1. Title, 2. Title (fallback, if no "MỤC")
-                r'^\s*(\d+)\)\s+(.+)$',           # 1) Title, 2) Title
+            # Move sub_decimal and decimal BEFORE arabic to prioritize specific matches
+            'sub_decimal': [
+                r'^\s*(\d+\.\d+\.\d+)\.\s+(.+)$',  # 1.1.1. Title
+                r'^\s*(\d+\.\d+\.\d+)\)\s+(.+)$',  # 1.1.1) Title
             ],
             'decimal': [
                 r'^\s*(\d+\.\d+)\.\s+(.+)$',  # 1.1. Title, 1.2. Title
                 r'^\s*(\d+\.\d+)\)\s+(.+)$',  # 1.1) Title, 1.2) Title
             ],
-            'sub_decimal': [
-                r'^\s*(\d+\.\d+\.\d+)\.\s+(.+)$',  # 1.1.1. Title
-                r'^\s*(\d+\.\d+\.\d+)\)\s+(.+)$',  # 1.1.1) Title
+            'arabic': [
+                r'^\s*(\d+)\.\s+(.+)$',           # 1. Title, 2. Title (fallback, if no "MỤC")
+                r'^\s*(\d+)\)\s+(.+)$',           # 1) Title, 2) Title
             ],
             'alphabetical': [
                 r'^\s*([a-z])\.\s+(.+)$',     # a. Title, b. Title
@@ -127,11 +126,11 @@ class TwoPhaseDocumentChunker:
         self.pattern_hierarchy = ['phan', 'chuong', 'uppercase_alphabetical', 'roman', 'muc', 'arabic', 'decimal', 'sub_decimal', 'alphabetical']
 
     def chunk_document(self, document: str, max_new_chunk_size: Optional[int] = None) -> List[StructuralChunk]:
-        print("Phase 1: Structure-based chunking...") if self.verbose else None
-        structural_chunks = self._phase1_structural_chunking(document, chunk_size=max_new_chunk_size)
+        logger.info("Phase 1: Structure-based chunking.")
+        structural_chunks = self._structural_chunking(document, chunk_size=max_new_chunk_size)
 
-        print("Phase 2: Recursive chunking for oversized chunks...") if self.verbose else None
-        final_chunks = self._phase2_recursive_chunking(structural_chunks)
+        logger.info("Phase 2: Recursive chunking for oversized chunks.")
+        final_chunks = self._recursive_chunking(structural_chunks)
         
         return final_chunks
 
@@ -186,7 +185,7 @@ class TwoPhaseDocumentChunker:
             "max_depth": max(section_depths) if section_depths else 0,
         }
 
-    def _phase1_structural_chunking(self, document: str, chunk_size: Optional[int] = None) -> List[StructuralChunk]:
+    def _structural_chunking(self, document: str, chunk_size: Optional[int] = None) -> List[StructuralChunk]:
         lines = document.split('\n')
         structural_elements = self._parse_document_structure(lines)
         structural_elements = self._normalize_heading_levels(structural_elements)
@@ -585,7 +584,7 @@ class TwoPhaseDocumentChunker:
         else:
             return ChunkType.PARAGRAPH
 
-    def _phase2_recursive_chunking(self, structural_chunks: List[StructuralChunk]) -> List[StructuralChunk]:
+    def _recursive_chunking(self, structural_chunks: List[StructuralChunk]) -> List[StructuralChunk]:
         final_chunks = []
         
         for chunk in structural_chunks:

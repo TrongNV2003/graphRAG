@@ -1,5 +1,3 @@
-"""Qdrant Vector Store - Hybrid Search with Dense + Sparse vectors"""
-
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -111,7 +109,6 @@ class QdrantVectorStore:
             return True
         except Exception as e:
             if "already exists" in str(e).lower():
-                logger.info(f"Collection '{name}' already exists")
                 return True
             logger.error(f"Failed to create collection '{name}': {e}")
             raise
@@ -154,7 +151,6 @@ class QdrantVectorStore:
         
         qdrant_points = []
         for p in points:
-            # Build named vectors
             vectors = {
                 "dense": p.vector
             }
@@ -244,7 +240,7 @@ class QdrantVectorStore:
     ) -> List[SearchResult]:
         """
         Qdrant hybrid search using prefetch + RRF fusion.
-        Combines dense (semantic) and sparse (BM25-style keyword) search.
+        Combines dense (semantic) and sparse (SPLADE) search.
         
         Args:
             query_vector: Dense embedding vector

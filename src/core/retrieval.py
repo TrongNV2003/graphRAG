@@ -1,4 +1,3 @@
-from pathlib import Path
 from loguru import logger
 from abc import ABC, abstractmethod
 from langchain_neo4j import Neo4jGraph
@@ -32,6 +31,12 @@ class GraphRetrieval(BaseRetrieval):
 
     def retrieve(self, target_entities: List[str], excluded_entities: Optional[List[str]] = None) -> List[Dict]:
         """Retrieve relevant graph based on the entities list, excluding specified entities.
+        
+        Strategy:
+        - Exact Match (high precision)
+        - Fulltext Fuzzy Search (handles typos)
+        - Substring Match (fallback)
+        
         Args:
             target_entities: List of entity names to search in graph DB
             excluded_entities: List of entity names to exclude from results
@@ -42,53 +47,141 @@ class GraphRetrieval(BaseRetrieval):
             return []
         
         excluded_entities = excluded_entities or []
+        excluded_lower = [e.lower() for e in excluded_entities] if excluded_entities else []
         
-        # Exclusion condition
+        # Exact Match
+        results = self._query_exact_match(target_entities, excluded_lower)
+        if results:
+            logger.debug(f"Exact match found {len(results)} results")
+            return results
+        
+        # Fulltext Fuzzy Search
+        results = self._query_fulltext(target_entities, excluded_lower)
+        if results:
+            logger.info(f"Fulltext fuzzy search found {len(results)} results")
+            return results
+        
+        # Substring (CONTAINS) Fallback
+        results = self._query_contains(target_entities, excluded_lower)
+        if results:
+            logger.info(f"Substring match found {len(results)} results")
+        else:
+            logger.warning(f"No graph results found for entities: {target_entities}")
+        
+        return results
+
+    def _build_lucene_query(self, query: str) -> str:
+        """Build Lucene query with escaping and fuzzy matching.
+        
+        Returns: query with prefix (*) and fuzzy (~1) matching.
+        """
+        import re
+        # Escape Lucene special characters
+        escaped = re.sub(r'([+\-&|!(){}[\]^"~*?:\\/])', r'\\\1', query.strip())
+        # Combine prefix match and fuzzy match (edit distance 1)
+        return f"{escaped}* OR {escaped}~1"
+
+    def _query_fulltext(self, target_entities: List[str], excluded_lower: List[str]) -> List[Dict]:
+        """Query using Neo4j fulltext index for fuzzy matching."""
+        from src.config.setting import retrieval_config
+        
+        try:
+            all_results = []
+            for entity_name in target_entities:
+                lucene_query = self._build_lucene_query(entity_name)
+                
+                cypher = """
+                CALL db.index.fulltext.queryNodes("entity_fulltext_index", $lucene_query)
+                YIELD node, score
+                WHERE score >= $min_score
+                  AND NOT (toLower(node.id) IN $excluded OR toLower(node.entity_role) IN $excluded)
+                WITH node, score
+                MATCH (node)-[r]-(m)
+                WHERE NOT (toLower(m.id) IN $excluded OR toLower(m.entity_role) IN $excluded)
+                WITH DISTINCT node, r, m, score
+                ORDER BY score DESC
+                RETURN { id: node.id, entity_role: node.entity_role, type: labels(node)[0] } AS source,
+                       type(r) AS relationship,
+                       { id: m.id, entity_role: m.entity_role, type: labels(m)[0] } AS target
+                LIMIT $limit
+                """
+                
+                params = {
+                    "lucene_query": lucene_query,
+                    "min_score": retrieval_config.fuzzy_min_score,
+                    "excluded": excluded_lower,
+                    "limit": self.graph_limit
+                }
+                
+                results = self._query_graph(cypher, params)
+                all_results.extend(results)
+            
+            # Deduplicate
+            seen = set()
+            unique_results = []
+            for r in all_results:
+                key = (r.get("source", {}).get("id"), r.get("relationship"), r.get("target", {}).get("id"))
+                if key not in seen:
+                    seen.add(key)
+                    unique_results.append(r)
+            
+            return unique_results[:self.graph_limit]
+            
+        except Exception as e:
+            logger.warning(f"Fulltext search failed: {e}. Falling back to substring match.")
+            return []
+
+    def _query_exact_match(self, target_entities: List[str], excluded_lower: List[str]) -> List[Dict]:
+        """Query with exact match on id/entity_role."""
         exclusion_clause = ""
-        if excluded_entities:
+        if excluded_lower:
             exclusion_clause = """
             AND NOT (toLower(n.id) IN $excluded OR toLower(n.entity_role) IN $excluded)
             AND NOT (toLower(m.id) IN $excluded OR toLower(m.entity_role) IN $excluded)
             """
         
-        # Exact match on id/entity_role for any entity in the list
-        cypher_exact = f"""
+        cypher = f"""
         UNWIND $entities as entity_name
         MATCH (n)
         WHERE (toLower(n.id) = toLower(entity_name) OR toLower(n.entity_role) = toLower(entity_name))
         {exclusion_clause}
         MATCH (n)-[r]-(m)
-        WHERE 1=1 {exclusion_clause.replace('AND', '') if excluded_entities else ''}
+        WHERE 1=1 {exclusion_clause.replace('AND', '') if excluded_lower else ''}
         WITH DISTINCT n, r, m
         RETURN {{ id: n.id, entity_role: n.entity_role, type: labels(n)[0] }} AS source,
                type(r) AS relationship,
                {{ id: m.id, entity_role: m.entity_role, type: labels(m)[0] }} AS target
         LIMIT $limit
         """
-
-        excluded_lower = [e.lower() for e in excluded_entities] if excluded_entities else []
+        
         params = {"entities": target_entities, "excluded": excluded_lower, "limit": self.graph_limit}
-        results = self._query_graph(cypher_exact, params)
+        return self._query_graph(cypher, params)
 
-        if results:
-            return results
-
-        # Fallback: substring match on id/entity_role for any entity in the list
-        cypher_contains = f"""
+    def _query_contains(self, target_entities: List[str], excluded_lower: List[str]) -> List[Dict]:
+        """Query with substring (CONTAINS) matching as final fallback."""
+        exclusion_clause = ""
+        if excluded_lower:
+            exclusion_clause = """
+            AND NOT (toLower(n.id) IN $excluded OR toLower(n.entity_role) IN $excluded)
+            AND NOT (toLower(m.id) IN $excluded OR toLower(m.entity_role) IN $excluded)
+            """
+        
+        cypher = f"""
         UNWIND $entities as entity_name
         MATCH (n)
         WHERE (toLower(n.id) CONTAINS toLower(entity_name) OR toLower(n.entity_role) CONTAINS toLower(entity_name))
         {exclusion_clause}
         MATCH (n)-[r]-(m)
-        WHERE 1=1 {exclusion_clause.replace('AND', '') if excluded_entities else ''}
+        WHERE 1=1 {exclusion_clause.replace('AND', '') if excluded_lower else ''}
         WITH DISTINCT n, r, m
         RETURN {{ id: n.id, entity_role: n.entity_role, type: labels(n)[0] }} AS source,
                type(r) AS relationship,
                {{ id: m.id, entity_role: m.entity_role, type: labels(m)[0] }} AS target
         LIMIT $limit
         """
-
-        return self._query_graph(cypher_contains, params)
+        
+        params = {"entities": target_entities, "excluded": excluded_lower, "limit": self.graph_limit}
+        return self._query_graph(cypher, params)
 
     def _query_graph(self, cypher: str, params: Optional[Dict] = None) -> List[Dict]:
         return self.graph_db.query(cypher, params=params or {})
@@ -264,32 +357,3 @@ class HybridRetrieval:
             "graph": graph_results,
             "chunk": chunk_results,
         }
-
-
-if __name__ == "__main__":
-    from src.config.setting import neo4j_config
-
-    graph_db = Neo4jGraph(
-        url=neo4j_config.url,
-        username=neo4j_config.username,
-        password=neo4j_config.password,
-    )
-    
-    retrieval = HybridRetrieval(
-        graph_db,
-        graph_limit=10,
-        chunk_top_k=5,
-        chunk_threshold=0.0,
-        auto_build=True
-    )
-    
-    target_entities = ["Elizabeth"]
-    query = "Tell me about Elizabeth and her relationships."
-    results = retrieval.retrieve(query=query, target_entities=target_entities)
-    
-    logger.info(f"Graph results: {len(results['graph'])}")
-    logger.info(f"Chunk results: {len(results['chunk'])}")
-    print("Graph:", results["graph"][:3])
-    print("\nChunks:")
-    for i, chunk in enumerate(results["chunk"][:3], 1):
-        print(f"  {i}. Score: {chunk['score']:.3f} | {chunk['chunk_text'][:100]}...")

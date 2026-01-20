@@ -1,4 +1,3 @@
-import json
 from loguru import logger
 from openai import OpenAI
 from typing import List, Dict
@@ -8,6 +7,7 @@ from src.core.retrieval import HybridRetrieval
 from src.engines.llm import AnalysisQueryLLM, GenerationResponseLLM
 from src.prompts.analysis_prompt import ANALYZE_SYSTEM_PROMPT, ANALYZE_PROMPT_TEMPLATE, ANALYZE_SCHEMA
 from src.prompts.response_prompt import ANSWERING_SYSTEM_PROMPT, ANSWERING_PROMPT_TEMPLATE
+
 
 class GraphQuerying:
     def __init__(
@@ -20,7 +20,6 @@ class GraphQuerying:
         analyze_prompt_system: str = ANALYZE_SYSTEM_PROMPT,
         analyze_schema: dict = ANALYZE_SCHEMA,
     ):
-        # HybridRetrieval now uses Qdrant internally for chunk search
         self.retriever = HybridRetrieval(
             graph_db,
             graph_limit=10,
@@ -181,7 +180,6 @@ class GraphQuerying:
 
     def semantic_response(self, query: str, top_k: int = 5, threshold: float = 0.0) -> dict:
         """Generate answer using Semantic Search (Dense vector) only."""
-        # 1. Retrieve chunks (dense only)
         # Override top_k and threshold
         original_top_k = self.retriever.chunk_retrieval.top_k
         original_threshold = self.retriever.chunk_retrieval.threshold
@@ -195,11 +193,10 @@ class GraphQuerying:
              self.retriever.chunk_retrieval.top_k = original_top_k
              self.retriever.chunk_retrieval.threshold = original_threshold
             
-        # 2. Format context
+        # Format context
         chunk_context = self._format_chunk_context(chunks)
         graph_context = "No graph context (Semantic Search mode)."
         
-        # 3. Generate Answer
         response = self.generator.call(
             query=query,
             graph_context=graph_context,
@@ -216,7 +213,6 @@ class GraphQuerying:
 
     def hybrid_response(self, query: str, top_k: int = 5, threshold: float = 0.0) -> dict:
         """Generate answer using Hybrid Search (Qdrant Dense+Sparse) only."""
-        # 1. Retrieve chunks (hybrid)
         original_top_k = self.retriever.chunk_retrieval.top_k
         original_threshold = self.retriever.chunk_retrieval.threshold
 
@@ -226,14 +222,14 @@ class GraphQuerying:
         try:
             chunks = self.retriever.chunk_retrieval.retrieve(query)
         finally:
-             self.retriever.chunk_retrieval.top_k = original_top_k
-             self.retriever.chunk_retrieval.threshold = original_threshold
+            self.retriever.chunk_retrieval.top_k = original_top_k
+            self.retriever.chunk_retrieval.threshold = original_threshold
             
-        # 2. Format context
+        # Format context
         chunk_context = self._format_chunk_context(chunks)
         graph_context = "No graph context (Hybrid Search mode)."
         
-        # 3. Generate Answer
+        # Generate Answer
         response = self.generator.call(
             query=query,
             graph_context=graph_context,
@@ -306,20 +302,3 @@ class GraphQuerying:
         finally:
             self.retriever.chunk_retrieval.top_k = original_top_k
             self.retriever.chunk_retrieval.threshold = original_threshold
-
-
-if __name__ == "__main__":
-    from src.config.setting import api_config, neo4j_config
-    client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
-
-    graph_db = Neo4jGraph(
-        url=neo4j_config.url,
-        username=neo4j_config.username,
-        password=neo4j_config.password
-    )
-    queries = GraphQuerying(client=client, graph_db=graph_db)
-    
-    query = "Tell me about Elizabeth and her relationships."
-    answer = queries.response(query=query)
-    
-    print(f"Query: {query}\nAnswer: {answer}")

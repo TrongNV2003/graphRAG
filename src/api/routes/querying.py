@@ -3,8 +3,7 @@ from langchain_neo4j import Neo4jGraph
 from openai import OpenAI
 
 from src.api.dependencies import get_openai_client, get_neo4j_graph
-from src.api.schemas.requests import QueryRequest, SearchRequest
-from src.api.schemas.responses import QueryResponse, SearchResponse
+from src.config.schemas import QueryRequest, SearchRequest, QueryResponse
 from src.services.querying import GraphQuerying
 
 router = APIRouter()

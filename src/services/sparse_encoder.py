@@ -15,7 +15,7 @@ class SparseEncoder:
     queries and documents with related terms, producing high-quality sparse vectors.
     
     Features:
-    - Neural-based token weighting (better than TF-IDF/BM25)
+    - Neural-based token weighting
     - Query/document expansion for better recall
     - Learned importance weights
     """

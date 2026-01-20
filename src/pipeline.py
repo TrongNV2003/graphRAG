@@ -2,7 +2,7 @@ from typing import List
 from openai import OpenAI
 from langchain_neo4j import Neo4jGraph
 
-from src.config.schemas import StructuralChunk
+from src.config.dataclass import StructuralChunk
 from src.processing.dataloaders import DataLoader
 from src.services.indexing import GraphIndexing
 from src.services.querying import GraphQuerying

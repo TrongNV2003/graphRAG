@@ -1,5 +1,3 @@
-"""Dense Vector Encoder - SentenceTransformer and OpenAI support"""
-
 import logging
 from typing import List, Optional
 
@@ -59,10 +57,9 @@ class DenseEncoder:
         try:
             from sentence_transformers import SentenceTransformer
             
-            logger.info(f"Loading local model: {self._model_name}")
             self._model = SentenceTransformer(self._model_name)
             self._dimension = self._model.get_sentence_embedding_dimension()
-            logger.info(f"Model loaded. Dimension: {self._dimension}")
+            logger.info(f"Loaded Model {self._model_name}. Dimension: {self._dimension}")
             
         except ImportError:
             raise ImportError("sentence-transformers required. Install: pip install sentence-transformers")

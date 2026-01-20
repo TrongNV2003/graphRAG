@@ -1,3 +1,19 @@
+"""
+DEPRECATED: This module is no longer used in the current architecture.
+The system now uses:
+- Neo4j Fulltext Index for fuzzy entity search (src/core/retrieval.py)
+- Qdrant for hybrid vector search (src/engines/qdrant.py)
+
+This file is kept for reference only. Consider removing in future cleanup.
+"""
+import warnings
+warnings.warn(
+    "src.engines.search is deprecated and not used. "
+    "Use src.core.retrieval.GraphRetrieval or src.engines.qdrant instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
 import os
 import json
 import bm25s

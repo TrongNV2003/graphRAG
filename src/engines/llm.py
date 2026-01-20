@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 from openai import OpenAI
 
-from src.config.schemas import Role
+from src.config.datatype import RoleType
 from src.config.setting import api_config, llm_config
 
 
@@ -92,8 +92,8 @@ class EntityExtractionLLM(BaseLLM):
                 stop=llm_config.stop_tokens,
                 model=llm_config.llm_model,
                 messages=[
-                    {"role": Role.SYSTEM.value, "content": self.system_prompt},
-                    {"role": Role.USER.value, "content": prompt_str},
+                    {"role": RoleType.SYSTEM.value, "content": self.system_prompt},
+                    {"role": RoleType.USER.value, "content": prompt_str},
                 ],
                 response_format={
                     "type": "json_schema",
@@ -153,8 +153,8 @@ class GenerationResponseLLM(BaseLLM):
                 stop=llm_config.stop_tokens,
                 model=llm_config.llm_model,
                 messages=[
-                    {"role": Role.SYSTEM.value, "content": self.system_prompt},
-                    {"role": Role.USER.value, "content": prompt_str},
+                    {"role": RoleType.SYSTEM.value, "content": self.system_prompt},
+                    {"role": RoleType.USER.value, "content": prompt_str},
                 ],
                 response_format={"type": "json_object"},
                 **generation_params
@@ -208,8 +208,8 @@ class AnalysisQueryLLM(BaseLLM):
                 stop=llm_config.stop_tokens,
                 model=llm_config.llm_model,
                 messages=[
-                    {"role": Role.SYSTEM.value, "content": self.system_prompt},
-                    {"role": Role.USER.value, "content": prompt_str},
+                    {"role": RoleType.SYSTEM.value, "content": self.system_prompt},
+                    {"role": RoleType.USER.value, "content": prompt_str},
                 ],
                 response_format={
                     "type": "json_schema",

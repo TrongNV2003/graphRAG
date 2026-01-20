@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from src.services.dense_encoder import get_dense_encoder
 
+
 class GraphStorage:
     """
     GraphStorage handles storing nodes and relationships into a Neo4j graph database.
@@ -16,7 +17,7 @@ class GraphStorage:
         self.__setup_schema()
 
     def __setup_schema(self):
-        """Đảm bảo các constraints và indexes cần thiết đã tồn tại trong database."""
+        """Make sure necessary constraints and indexes exist in the database."""
         logger.info("Setting up database constraints")
         
         constraint_query = """
