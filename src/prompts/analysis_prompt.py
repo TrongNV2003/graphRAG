@@ -23,15 +23,14 @@ Analyze the user query and extract the following information into a JSON object:
 ### Example Outputs:
 Query: 'Besides Elizabeth I, are there any other cases?'
 Output:
-{{"target_entities": ["Cases", "Historical Figures"], "excluded_entities": ["Elizabeth I"], "normalized_query": "List of historical cases or figures excluding Elizabeth I"}}
+{"target_entities": ["Cases", "Historical Figures"], "excluded_entities": ["Elizabeth I"], "normalized_query": "List of historical cases or figures excluding Elizabeth I"}
 
 Query: 'Compare Elizabeth I and Mary Stuart'
 Output:
-{{"target_entities": ["Elizabeth I", "Mary Stuart"], "excluded_entities": [], "normalized_query": "Comparison of traits and history between Elizabeth I and Mary Stuart"}}
-
+{"target_entities": ["Elizabeth I", "Mary Stuart"], "excluded_entities": [], "normalized_query": "Comparison of traits and history between Elizabeth I and Mary Stuart"}
 ### Analyze the following query:
 <input>
-{query}
+{{ query }}
 </input>
 """
 

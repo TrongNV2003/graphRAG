@@ -8,11 +8,11 @@ from langchain_neo4j import Neo4jGraph
 from src.config.schemas import StructuralChunk
 from src.engines.llm import EntityExtractionLLM
 from src.processing.dataloaders import DataLoader
-from src.handler.chunking import TwoPhaseDocumentChunker
-from src.handler.storage import GraphStorage, EmbedStorage
-from src.processing.preprocessing import EntityPostprocessor
+from src.processing.chunking import TwoPhaseDocumentChunker
+from src.core.storage import GraphStorage, QdrantEmbedStorage
+from src.processing.postprocessing import EntityPostprocessor
 from src.config.setting import api_config, llm_config, neo4j_config
-from src.prompts.ner import EXTRACT_SYSTEM_PROMPT, EXTRACT_PROMPT_TEMPLATE, EXTRACT_SCHEMA
+from src.prompts.ner_prompt import EXTRACT_SYSTEM_PROMPT, EXTRACT_PROMPT_TEMPLATE, EXTRACT_SCHEMA
 
 class GraphIndexing:
     def __init__(
@@ -44,10 +44,8 @@ class GraphIndexing:
         
         self.storage = GraphStorage(self.graph_db)
         
-        self.embed_storage = EmbedStorage(
-            graph_db=self.graph_db,
-            label="Chunk",
-        )
+        # Qdrant storage for hybrid search (chunk embeddings)
+        self.qdrant_storage = QdrantEmbedStorage()
 
     def chunking(self, document: dict, max_new_chunk_size: Optional[int] = None) -> List['StructuralChunk']:
         chunks = self.chunker.chunk_document(document, max_new_chunk_size=max_new_chunk_size)
@@ -121,9 +119,9 @@ class GraphIndexing:
                 all_nodes.extend(dedup_nodes)
                 all_relationships.extend(dedup_relationships)
 
-                # Store embeddings for this batch of chunks
+                # Store embeddings to Qdrant for hybrid search
                 if batch_chunks:
-                    self.embed_storage.store_embeddings(batch_chunks)
+                    self.qdrant_storage.store_embeddings(batch_chunks)
                 
                 # Reset batch
                 batch_nodes = []

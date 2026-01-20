@@ -19,17 +19,17 @@ ANSWERING_PROMPT_TEMPLATE = (
     "- Provide a clear, well-structured response in natural language\n"
     "\n"
     "### Graph Context (Entities and Relationships):\n"
-    "{graph_context}\n"
+    "{{ graph_context }}\n"
     "\n"
     "### Document Chunks (Relevant Text Passages):\n"
-    "{chunk_context}\n"
+    "{{ chunk_context }}\n"
     "\n"
     "### User Query:\n"
     "<query>\n"
-    "{query}\n"
+    "{{ query }}\n"
     "</query>\n"
     "\n"
     "### Output:\n"
     "Resonse with JSON format:\n"
-    '{{"answer": "Your Response"}}\n'
+    '{"answer": "Your Response"}\n'
 )

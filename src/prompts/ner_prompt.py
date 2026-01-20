@@ -14,12 +14,12 @@ EXTRACT_PROMPT_TEMPLATE = (
     '    - `relationship_type`: The type of relationship between two entities.\n'
     "\n"
     "## Example output (valid JSON):\n"
-    '{{"nodes": [{{"id": "entity_name", "entity_type": "entity_type", "entity_role": "entity_role"}}],\n'
-    '"relationships": [{{"source": "entity_1", "target": "entity_2", "relationship_type": "relationship_type"}}]}}\n'
+    '{"nodes": [{"id": "entity_name", "entity_type": "entity_type", "entity_role": "entity_role"}],\n'
+    '"relationships": [{"source": "entity_1", "target": "entity_2", "relationship_type": "relationship_type"}]}\n'
     "\n"
     "### Execute with the following input\n"
     "<input>\n"
-    "{text}\n"
+    "{{ text }}\n"
     "</input>\n"
 )
 
@@ -46,7 +46,7 @@ EXTRACT_SCHEMA = {
                             "description": "Role or function of the entity (e.g., 'Queen of England'). If not applicable, leave as an empty string ('')."
                         },
                     },
-                    "required": ["id", "entity_type"],
+                    "required": ["id", "entity_type", "entity_role"],
                     "additionalProperties": False
                 }
             },
@@ -73,6 +73,7 @@ EXTRACT_SCHEMA = {
                 }
             }
         },
+        "required": ["nodes", "relationships"],
         "additionalProperties": False
     },
     "strict": True,

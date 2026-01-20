@@ -32,10 +32,20 @@ class TwoPhaseDocumentChunker:
         self.chunk_overlap = chunk_overlap
         self.verbose = verbose
         
-        if tokenize_model is None:
-            self.tokenizer = AutoTokenizer.from_pretrained(llm_config.llm_model, use_fast=True)
+        # Determine tokenizer model
+        model_name = tokenize_model or llm_config.llm_model
+        
+        # Use tiktoken for OpenAI models, fallback to gpt2 for compatibility
+        if model_name.lower().startswith(("gpt-", "o1-", "openai/")):
+            # OpenAI models: use gpt2 tokenizer as proxy (similar tokenization)
+            self.tokenizer = AutoTokenizer.from_pretrained("gpt2", use_fast=True)
+            logger.info(f"Using gpt2 tokenizer as proxy for OpenAI model: {model_name}")
         else:
-            self.tokenizer = AutoTokenizer.from_pretrained(tokenize_model, use_fast=True)
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+            except Exception as e:
+                logger.warning(f"Failed to load tokenizer for {model_name}: {e}. Falling back to gpt2.")
+                self.tokenizer = AutoTokenizer.from_pretrained("gpt2", use_fast=True)
 
         # Markdown heading patterns
         self.heading_patterns = {

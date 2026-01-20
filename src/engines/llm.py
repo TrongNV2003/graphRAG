@@ -1,5 +1,6 @@
 import json
 from loguru import logger
+from jinja2 import Template
 from typing import Optional, Any
 from abc import ABC, abstractmethod
 
@@ -9,7 +10,29 @@ from src.config.schemas import Role
 from src.config.setting import api_config, llm_config
 
 
-class BaseLLM(ABC):
+class PromptMixin:
+    """
+    Mixin class to handle Jinja2 prompt injection.
+    Requires the consumer class to have a 'prompt_template' attribute.
+    """
+    def inject_prompt(self, **kwargs: Any) -> str:
+        """
+        Injects the provided keyword arguments into the prompt template using Jinja2.
+        Args:
+            **kwargs: Keyword arguments to be injected into the prompt template.
+            e.g. kwargs = {"entities": [...], "text": "..."}
+        Returns:
+            str: The formatted prompt string.
+        """
+        if not hasattr(self, 'prompt_template') or self.prompt_template is None:
+            raise AttributeError(f"{self.__class__.__name__} must define 'prompt_template' to use PromptMixin.")
+        
+        template = Template(self.prompt_template)
+        prompt_str = template.render(**kwargs)
+        return prompt_str
+
+
+class BaseLLM(PromptMixin, ABC):
     def __init__(
         self,
         client: OpenAI,
@@ -25,21 +48,8 @@ class BaseLLM(ABC):
         self.system_prompt = system_prompt
         self.prompt_template = prompt_template
 
-    def _inject_prompt(self, **kwargs: Any) -> str:
-        """
-        Injects the provided keyword arguments into the prompt template.
-        Args:
-            **kwargs: Keyword arguments to be injected into the prompt template.
-            e.g. kwargs = {"entities": [...], "text": "..."}
-        Returns:
-            str: The formatted prompt string.
-        """
-        
-        prompt_str = self.prompt_template.format(**kwargs)
-        return prompt_str
-
     @abstractmethod
-    def call(self, **kwargs: Any) -> dict:
+    def call(self, **kwargs: Any) -> Any:
         pass
 
 
@@ -52,7 +62,17 @@ class EntityExtractionLLM(BaseLLM):
         client: Optional[OpenAI] = None,
     ) -> None:
         if client is None:
-            client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
+            is_openai_model = llm_config.llm_model.lower().startswith(("gpt-", "o1-", "openai/"))
+            
+            if is_openai_model and api_config.openai_api_key:
+                logger.info(f"Using OpenAI API for model: {llm_config.llm_model}")
+                client = OpenAI(api_key=api_config.openai_api_key)
+            else:
+                logger.info(f"Using Custom API for model: {llm_config.llm_model}")
+                client = OpenAI(
+                    api_key=api_config.api_key or "EMPTY", 
+                    base_url=api_config.base_url
+                )
 
         super().__init__(client, prompt_template, system_prompt)
         
@@ -62,7 +82,7 @@ class EntityExtractionLLM(BaseLLM):
         nodes = []
         relationships = []
         
-        prompt_str = self._inject_prompt(**kwargs)
+        prompt_str = self.inject_prompt(**kwargs)
         
         try:
             extraction_params = llm_config.extraction.model_dump()
@@ -89,7 +109,7 @@ class EntityExtractionLLM(BaseLLM):
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON response: {content}")
                 logger.error(f"JSON decode error: {e}")
-                return {"nodes": [], "relationships": []}
+                raise
 
             nodes = payload.get("nodes", []) if isinstance(payload, dict) else []
             relationships = payload.get("relationships", []) if isinstance(payload, dict) else []
@@ -97,7 +117,7 @@ class EntityExtractionLLM(BaseLLM):
         
         except Exception as e:
             logger.error(f"OpenAI API call failed: {str(e)}")
-            raise e
+            raise
 
 
 class GenerationResponseLLM(BaseLLM):
@@ -108,12 +128,22 @@ class GenerationResponseLLM(BaseLLM):
         client: Optional[OpenAI] = None,
     ) -> None:
         if client is None:
-            client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
+            is_openai_model = llm_config.llm_model.lower().startswith(("gpt-", "o1-", "openai/"))
+            
+            if is_openai_model and api_config.openai_api_key:
+                logger.info(f"Using OpenAI API for model: {llm_config.llm_model}")
+                client = OpenAI(api_key=api_config.openai_api_key)
+            else:
+                logger.info(f"Using Custom API for model: {llm_config.llm_model}")
+                client = OpenAI(
+                    api_key=api_config.api_key or "EMPTY", 
+                    base_url=api_config.base_url
+                )
 
         super().__init__(client, prompt_template, system_prompt)
 
     def call(self, **kwargs: Any) -> dict:
-        prompt_str = self._inject_prompt(**kwargs)
+        prompt_str = self.inject_prompt(**kwargs)
         
         try:
             generation_params = llm_config.generation.model_dump()
@@ -131,11 +161,17 @@ class GenerationResponseLLM(BaseLLM):
             )
             content = response.choices[0].message.content
             
-            return content
+            if not content:
+                raise ValueError("OpenAI returned empty content.")
+            
+            return json.loads(content)
         
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse JSON from OpenAI response: {content}")
+            raise
         except Exception as e:
             logger.error(f"OpenAI API call failed: {str(e)}")
-            raise e
+            raise 
         
 class AnalysisQueryLLM(BaseLLM):
     def __init__(
@@ -146,13 +182,23 @@ class AnalysisQueryLLM(BaseLLM):
         json_schema: Optional[dict] = None,
     ) -> None:
         if client is None:
-            client = OpenAI(api_key=api_config.api_key, base_url=api_config.base_url)
+            is_openai_model = llm_config.llm_model.lower().startswith(("gpt-", "o1-", "openai/"))
+            
+            if is_openai_model and api_config.openai_api_key:
+                logger.info(f"Using OpenAI API for model: {llm_config.llm_model}")
+                client = OpenAI(api_key=api_config.openai_api_key)
+            else:
+                logger.info(f"Using Custom API for model: {llm_config.llm_model}")
+                client = OpenAI(
+                    api_key=api_config.api_key or "EMPTY", 
+                    base_url=api_config.base_url
+                )
 
         super().__init__(client, prompt_template, system_prompt)
         self.json_schema = json_schema
 
     def call(self, **kwargs: Any) -> dict:
-        prompt_str = self._inject_prompt(**kwargs)
+        prompt_str = self.inject_prompt(**kwargs)
         
         try:
             generation_params = llm_config.generation.model_dump()
@@ -172,7 +218,15 @@ class AnalysisQueryLLM(BaseLLM):
                 **generation_params
             )
             content = response.choices[0].message.content
-            return content
+
+            if not content:
+                raise ValueError("OpenAI returned empty content.")
+            
+            return json.loads(content)
+
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse JSON from OpenAI response: {content}")
+            raise
         
         except Exception as e:
             logger.error(f"OpenAI API call failed: {str(e)}")

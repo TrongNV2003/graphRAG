@@ -1,20 +1,26 @@
 import os
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-load_dotenv()
+load_dotenv(override=True)
 
 class APIConfig(BaseSettings):
-    base_url: str = Field(
+    base_url: Optional[str] = Field(
+        default=None,
         description="Base URL for OpenAI API",
         alias="API_URL",
     )
-    api_key: str = Field(
+    api_key: Optional[str] = Field(
         description="API key for OpenAI",
         alias="API_KEY",
+    )
+    openai_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for OpenAI API",
+        alias="OPENAI_API_KEY",
     )
 
 class LLMTaskParams(BaseModel):
@@ -77,9 +83,38 @@ class Neo4jConfig(BaseSettings):
 
 class EmbeddingModelConfig(BaseSettings):
     embedder_model: str = Field(
-        default="hiieu/halong_embedding",
+        default="contextboxai/halong_embedding",
         description="Model name for sentence embedding",
         alias="EMBEDDER_MODEL"
+    )
+
+
+class QdrantConfig(BaseSettings):
+    """Qdrant vector database configuration"""
+    url: Optional[str] = Field(
+        default=None,
+        description="Qdrant Cloud URL (optional)",
+        alias="QDRANT_URL"
+    )
+    api_key: Optional[str] = Field(
+        default=None,
+        description="Qdrant API key (optional)",
+        alias="QDRANT_API_KEY"
+    )
+    host: str = Field(
+        default="localhost",
+        description="Local Qdrant host",
+        alias="QDRANT_HOST"
+    )
+    port: int = Field(
+        default=6333,
+        description="Local Qdrant port",
+        alias="QDRANT_PORT"
+    )
+    collection_name: str = Field(
+        default="hybridrag_chunks",
+        description="Collection name for chunk vectors",
+        alias="QDRANT_COLLECTION"
     )
 
 
@@ -87,3 +122,4 @@ api_config = APIConfig()
 llm_config = LLMConfig()
 neo4j_config = Neo4jConfig()
 embed_config = EmbeddingModelConfig()
+qdrant_config = QdrantConfig()

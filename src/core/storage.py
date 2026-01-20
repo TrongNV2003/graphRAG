@@ -3,9 +3,8 @@ from loguru import logger
 from collections import defaultdict
 from langchain_neo4j import Neo4jGraph
 from typing import Any, Dict, List, Optional, Union
-from sentence_transformers import SentenceTransformer
 
-from src.config.setting import embed_config
+from src.services.dense_encoder import get_dense_encoder
 
 class GraphStorage:
     """
@@ -30,6 +29,17 @@ class GraphStorage:
         except Exception as e:
             logger.error(f"Failed to create constraint: {e}")
 
+        # Create fulltext index for fuzzy search on Entity names
+        index_query = """
+        CREATE FULLTEXT INDEX entity_fulltext_index IF NOT EXISTS
+        FOR (n:Entity) ON EACH [n.id]
+        """
+        try:
+            self.graph_db.query(index_query)
+            logger.info("Fulltext index 'entity_fulltext_index' ensured")
+        except Exception as e:
+            logger.error(f"Failed to create fulltext index: {e}")
+
     def store_graph(self, graph_data: dict) -> None:
         """
         Store nodes and relationships into the graph database.
@@ -45,7 +55,6 @@ class GraphStorage:
             entity_role = node.get("entity_role", "")
             
             if not id or id.strip() == "":
-                logger.warning(f"Skipping node with missing 'id': {node}")
                 continue
             
             normalized_type = self._normalize_label(entity_type)
@@ -71,9 +80,8 @@ class GraphStorage:
 
         try:
             if nodes_to_store:
-                result = self.graph_db.query(node_query, params={"nodes": nodes_to_store})
-                if result:
-                    logger.info(f"Stored/updated {len(nodes_to_store)} nodes.")
+                node_result = self.graph_db.query(node_query, params={"nodes": nodes_to_store})
+                logger.info(f"Upserted {node_result[0]['node_count']} nodes.")
         except Exception as e:
             logger.error(f"Error storing nodes: {str(e)}")
 
@@ -81,29 +89,30 @@ class GraphStorage:
         # Add relationships
         rels_to_store = []
         for rel in graph_data.get("relationships", []):
+            # Validate relationship structure
             if not all(key in rel for key in ["source", "target", "relationship_type"]):
-                logger.warning(f"Skipping invalid relationship with missing keys: {rel}")
                 continue
+
+            # Skip self-referential relationships
             if rel["source"] == rel["target"]:
-                logger.warning(f"Skipping self-referential relationship: {rel}")
                 continue
             
             source = rel["source"].strip()
             target = rel["target"].strip()
             relationship_type = rel["relationship_type"]
             
+            # Validate source, target, and relationship_type
             if source == "" or target == "":
-                logger.warning(f"Skipping relationship with empty source/target: {rel}")
                 continue
             
+            # Skip invalid relationship types
             if not relationship_type or relationship_type.strip() == "" or relationship_type.strip() == "-":
-                logger.warning(f"Skipping relationship with empty/invalid category: {rel}")
                 continue
             
             normalized_rel_type = self._normalize_label(relationship_type)
             
+            # Skip invalid normalized relationship types
             if not normalized_rel_type or normalized_rel_type == "_":
-                logger.warning(f"Skipping relationship with invalid normalized type: '{normalized_rel_type}'")
                 continue
             
             rels_to_store.append({
@@ -125,11 +134,8 @@ class GraphStorage:
             RETURN count(r) as rel_count
             """
             try:
-                result = self.graph_db.query(rel_query, params={"rels_data": rels_data})
-                if result:
-                    if result[0]['rel_count'] < len(rels_data):
-                        logger.warning(f"Only {result[0]['rel_count']}/{len(rels_data)} relationships created - some nodes may be missing")
-                    logger.info(f"Stored/updated {len(rels_data)} relationships of type '{rel_type}.")
+                relationship_result = self.graph_db.query(rel_query, params={"rels_data": rels_data})
+                logger.info(f"Upserted {relationship_result[0]['rel_count']} relationships.")
             except Exception as e:
                 logger.error(f"Failed to store relationships of type '{rel_type}': {str(e)}")
 
@@ -145,127 +151,115 @@ class GraphStorage:
             logger.error(f"Error clearing graph data: {e}")
 
 
-class EmbedStorage:
+class QdrantEmbedStorage:
     """
-    EmbedStorage handles embedding and storing chunks into a Neo4j graph database.
+    QdrantEmbedStorage handles embedding and storing chunks into Qdrant vector database.
+    Supports both dense and sparse vectors for hybrid search.
     """
-    def __init__(self, graph_db: Neo4jGraph, label: str = "Chunk"):
-        self.graph_db = graph_db
-        self.embedder = SentenceTransformer(embed_config.embedder_model)
-        self.label = label # Label node cho các chunk embeddings
-        self.__setup_schema()
+    def __init__(
+        self,
+        collection_name: Optional[str] = None,
+        auto_create: bool = True
+    ):
+        from src.engines.qdrant import create_qdrant_store
+        from src.services.sparse_encoder import get_sparse_encoder
+        from src.config.setting import qdrant_config
+        
+        self.vector_store = create_qdrant_store()
+        self.collection_name = collection_name or qdrant_config.collection_name
+        self.embedder = get_dense_encoder()
+        self._sparse_encoder = None
+        
+        if auto_create:
+            self._ensure_collection()
     
-    def __setup_schema(self):
-        """Đảm bảo constraint uniqueness cho Chunk.id."""
-        logger.info(f"Setting up database constraints for {self.label}")
-        
-        constraint_query = f"""
-        CREATE CONSTRAINT chunk_id_uniqueness IF NOT EXISTS
-        FOR (c:{self.label}) REQUIRE c.id IS UNIQUE
-        """
-        
-        try:
-            self.graph_db.query(constraint_query)
-            logger.info(f"Constraint chunk_id_uniqueness ensured for {self.label}")
-        except Exception as e:
-            logger.error(f"Failed to create {self.label} constraint: {e}")
-        self.__setup_schema()
-
-    def __setup_schema(self):
-        """Ensure necessary constraints exist for Chunk nodes."""
-        logger.info(f"Setting up database constraints for {self.label}")
-        
-        constraint_query = f"""
-        CREATE CONSTRAINT chunk_id_uniqueness IF NOT EXISTS
-        FOR (c:{self.label}) REQUIRE c.id IS UNIQUE
-        """
-        
-        try:
-            self.graph_db.query(constraint_query)
-        except Exception as e:
-            logger.error(f"Failed to create {self.label} constraint: {e}")
-
+    @property
+    def sparse_encoder(self):
+        if self._sparse_encoder is None:
+            from src.services.sparse_encoder import get_sparse_encoder
+            self._sparse_encoder = get_sparse_encoder()
+        return self._sparse_encoder
+    
+    def _ensure_collection(self):
+        """Ensure collection exists, create if not"""
+        if not self.vector_store.collection_exists(self.collection_name):
+            dimension = self.embedder.get_dimension()
+            self.vector_store.create_collection(
+                name=self.collection_name,
+                dimension=dimension,
+                enable_sparse=True
+            )
+            logger.info(f"Created Qdrant collection: {self.collection_name}")
+    
     def store_embeddings(self, chunks: List[Union[Dict[str, Any], Any]], doc_id: Optional[str] = None) -> int:
         """
-        Embed and store chunks into the graph database.
+        Embed and store chunks into Qdrant vector database.
+        
         Args:
-            chunks (List[Union[Dict[str, Any], Any]]): List of chunks to embed and store.
-            doc_id (Optional[str]): Optional document ID to associate with each chunk.
+            chunks: List of chunks to embed and store.
+            doc_id: Optional document ID to associate with each chunk.
+            
         Returns:
             int: Number of chunks successfully stored.
         """
+        from src.models import VectorPoint
         
-        rows: List[Dict[str, Any]] = []
+        points: List[VectorPoint] = []
+        
         for chunk in chunks:
             formatted = self._format_chunk(chunk, doc_id)
             if formatted:
-                rows.append(formatted)
-
-        if not rows:
-            logger.info("No valid chunks to embed/store.")
+                points.append(formatted)
+        
+        if not points:
+            logger.info("No valid chunks to embed/store in Qdrant.")
             return 0
-
-        query = f"""
-        UNWIND $rows as row
-        MERGE (c:{self.label} {{id: row.id}})
-        ON CREATE SET c.text = row.text,
-                      c.embedding = row.embedding,
-                      c.doc_id = row.doc_id,
-                      c.chunk_type = row.chunk_type
-        ON MATCH SET c.text = row.text,
-                     c.embedding = row.embedding,
-                     c.doc_id = row.doc_id,
-                     c.chunk_type = row.chunk_type
-        RETURN count(c) as count
-        """
-
+        
         try:
-            result = self.graph_db.query(query, params={"rows": rows})
-            stored = result[0]["count"] if result else 0
-            logger.info(f"Stored/updated {stored} chunk embeddings")
-            return stored
+            self.vector_store.upsert(self.collection_name, points)
+            logger.info(f"Stored {len(points)} chunk embeddings to Qdrant")
+            return len(points)
         except Exception as e:
-            logger.error(f"Failed to store embeddings: {e}")
+            logger.error(f"Failed to store embeddings to Qdrant: {e}")
             return 0
-
-    def ensure_vector_index(self, dimension: int, similarity: str = "cosine") -> None:
-        index_query = f"""
-        CREATE VECTOR INDEX chunk_embedding_index IF NOT EXISTS
-        FOR (c:{self.label}) ON (c.embedding)
-        OPTIONS {{dimension: $dim, similarityFunction: $sim}}
-        """
-        try:
-            self.graph_db.query(index_query, params={"dim": dimension, "sim": similarity})
-            logger.info("Vector index ensured for chunk embeddings")
-        except Exception as e:
-            logger.error(f"Failed to create vector index: {e}")
-
-
-    def _get_embedding(self, text: str) -> List[float]:
-        return self.embedder.encode(text, normalize_embeddings=True).tolist()
-
-
-    def _format_chunk(self, chunk: Union[Dict[str, Any], Any], doc_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    
+    def _format_chunk(self, chunk: Union[Dict[str, Any], Any], doc_id: Optional[str]) -> Optional['VectorPoint']:
+        """Format chunk into VectorPoint for Qdrant storage"""
+        from src.models import VectorPoint
+        
         content = getattr(chunk, "content", None) or chunk.get("content", "")
         if not content or not str(content).strip():
             return None
-
+        
         metadata = getattr(chunk, "metadata", None) or chunk.get("metadata", {}) or {}
         chunk_type = getattr(chunk, "chunk_type", None) or chunk.get("chunk_type", "")
         chunk_type_val = chunk_type.value if hasattr(chunk_type, "value") else str(chunk_type)
-
+        
         chunk_id = metadata.get("chunk_id") or metadata.get("id") or str(uuid.uuid4())
-
+        
         try:
-            embedding = self._get_embedding(content)
+            # Generate dense embedding
+            dense_embedding = self.embedder.encode(content)
+            
+            # Generate sparse embedding
+            sparse_result = self.sparse_encoder.encode(content)
+            
+            return VectorPoint(
+                id=chunk_id,
+                vector=dense_embedding,
+                payload={
+                    "chunk_id": chunk_id,
+                    "content": content,
+                    "doc_id": doc_id or metadata.get("doc_id"),
+                    "chunk_type": chunk_type_val,
+                },
+                sparse_indices=sparse_result.indices,
+                sparse_values=sparse_result.values
+            )
         except Exception as e:
             logger.error(f"Embedding failed for chunk_id={chunk_id}: {e}")
             return None
-
-        return {
-            "id": chunk_id,
-            "text": content,
-            "doc_id": doc_id or metadata.get("doc_id"),
-            "chunk_type": chunk_type_val,
-            "embedding": embedding,
-        }
+    
+    def clear_collection(self) -> bool:
+        """Clear all data from collection"""
+        return self.vector_store.delete_collection(self.collection_name)
