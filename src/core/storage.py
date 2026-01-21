@@ -4,8 +4,8 @@ from collections import defaultdict
 from langchain_neo4j import Neo4jGraph
 from typing import Any, Dict, List, Optional, Union
 
+from src.config.dataclass import VectorPoint
 from src.services.dense_encoder import get_dense_encoder
-
 
 class GraphStorage:
     """
@@ -37,7 +37,6 @@ class GraphStorage:
         """
         try:
             self.graph_db.query(index_query)
-            logger.info("Fulltext index 'entity_fulltext_index' ensured")
         except Exception as e:
             logger.error(f"Failed to create fulltext index: {e}")
 
@@ -59,6 +58,10 @@ class GraphStorage:
                 continue
             
             normalized_type = self._normalize_label(entity_type)
+            
+            # Skip nodes with empty label
+            if not normalized_type or normalized_type.strip("_") == "":
+                continue
 
             nodes_to_store.append({
                 "label": normalized_type,
@@ -126,6 +129,7 @@ class GraphStorage:
         for rel in rels_to_store:
             rels_by_type[rel['type']].append(rel)
 
+        total_upserted = 0
         for rel_type, rels_data in rels_by_type.items():
             rel_query = f"""
             UNWIND $rels_data as rel
@@ -136,9 +140,12 @@ class GraphStorage:
             """
             try:
                 relationship_result = self.graph_db.query(rel_query, params={"rels_data": rels_data})
-                logger.info(f"Upserted {relationship_result[0]['rel_count']} relationships.")
+                total_upserted += relationship_result[0]['rel_count']
             except Exception as e:
                 logger.error(f"Failed to store relationships of type '{rel_type}': {str(e)}")
+        
+        if total_upserted > 0:
+            logger.info(f"Upserted {total_upserted} relationships.")
 
     def _normalize_label(self, label: str) -> str:
         """Normalize label for Neo4j"""
@@ -150,6 +157,265 @@ class GraphStorage:
             self.graph_db.query("MATCH (n) DETACH DELETE n")
         except Exception as e:
             logger.error(f"Error clearing graph data: {e}")
+
+
+    def backup_graph(self, output_path: str, batch_size: int = 5000) -> dict:
+        """
+        Backup the entire graph to a zip file containing CSVs.
+        
+        Args:
+            output_path: Path for the output zip file.
+            batch_size: Number of records to fetch per batch.
+            
+        Returns:
+            dict: Metadata about the backup (counts, timestamp).
+        """
+        import csv
+        import json
+        import zipfile
+        from datetime import datetime
+        from io import StringIO
+        
+        node_count = 0
+        rel_count = 0
+        timestamp = datetime.now().isoformat()
+        
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Export Nodes
+            nodes_buffer = StringIO()
+            writer = csv.writer(nodes_buffer)
+            writer.writerow(['id', 'labels', 'entity_type', 'entity_role'])
+            
+            offset = 0
+            while True:
+                nodes = self._get_nodes_batch(offset, batch_size)
+                if not nodes:
+                    break
+                for node in nodes:
+                    writer.writerow([
+                        node.get('id', ''),
+                        node.get('labels', ''),
+                        node.get('entity_type', ''),
+                        node.get('entity_role', ''),
+                    ])
+                    node_count += 1
+                offset += batch_size
+            
+            zf.writestr('nodes.csv', nodes_buffer.getvalue())
+            nodes_buffer.close()
+            
+            # Export Relationships
+            rels_buffer = StringIO()
+            writer = csv.writer(rels_buffer)
+            writer.writerow(['source', 'target', 'type'])
+            
+            offset = 0
+            while True:
+                rels = self._get_rels_batch(offset, batch_size)
+                if not rels:
+                    break
+                for rel in rels:
+                    writer.writerow([
+                        rel.get('source', ''),
+                        rel.get('target', ''),
+                        rel.get('type', ''),
+                    ])
+                    rel_count += 1
+                offset += batch_size
+            
+            zf.writestr('relationships.csv', rels_buffer.getvalue())
+            rels_buffer.close()
+            
+            # Write Metadata
+            metadata = {
+                "backup_timestamp": timestamp,
+                "node_count": node_count,
+                "relationship_count": rel_count,
+                "schema_version": "1.0"
+            }
+            zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+        
+        logger.info(f"Backup completed: {node_count} nodes, {rel_count} relationships -> {output_path}")
+        return metadata
+
+    def _get_nodes_batch(self, skip: int, limit: int) -> List[Dict]:
+        """Get a batch of nodes for backup."""
+        query = """
+        MATCH (n:Entity)
+        RETURN n.id AS id, 
+               reduce(s = '', l IN labels(n) | s + CASE WHEN s = '' THEN l ELSE ';' + l END) AS labels,
+               n.entity_type AS entity_type,
+               n.entity_role AS entity_role
+        ORDER BY n.id
+        SKIP $skip LIMIT $limit
+        """
+        try:
+            return self.graph_db.query(query, params={"skip": skip, "limit": limit})
+        except Exception as e:
+            logger.error(f"Error fetching nodes batch: {e}")
+            return []
+
+    def _get_rels_batch(self, skip: int, limit: int) -> List[Dict]:
+        """Get a batch of relationships for backup."""
+        query = """
+        MATCH (s:Entity)-[r]->(t:Entity)
+        RETURN s.id AS source, t.id AS target, type(r) AS type
+        ORDER BY s.id, t.id
+        SKIP $skip LIMIT $limit
+        """
+        try:
+            return self.graph_db.query(query, params={"skip": skip, "limit": limit})
+        except Exception as e:
+            logger.error(f"Error fetching relationships batch: {e}")
+            return []
+
+    def restore_graph(self, zip_path: str, clear_existing: bool = True, batch_size: int = 5000) -> dict:
+        """
+        Restore graph from a backup zip file.
+        
+        Args:
+            zip_path: Path to the backup zip file.
+            clear_existing: Whether to clear existing data before restore.
+            batch_size: Number of records to upsert per batch.
+            
+        Returns:
+            dict: Restore statistics.
+        """
+        import csv
+        import json
+        import zipfile
+        from io import TextIOWrapper
+        
+        if clear_existing:
+            logger.info("Clearing existing graph data before restore...")
+            self.clear_all()
+        
+        nodes_restored = 0
+        rels_restored = 0
+        errors = []
+        
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            # Restore Nodes
+            with zf.open('nodes.csv') as f:
+                reader = csv.DictReader(TextIOWrapper(f, 'utf-8'))
+                batch = []
+                for row in reader:
+                    batch.append(row)
+                    if len(batch) >= batch_size:
+                        count, err = self._upsert_nodes_batch(batch)
+                        nodes_restored += count
+                        if err:
+                            errors.append(err)
+                        batch = []
+                if batch:
+                    count, err = self._upsert_nodes_batch(batch)
+                    nodes_restored += count
+                    if err:
+                        errors.append(err)
+            
+            # Restore Relationships
+            with zf.open('relationships.csv') as f:
+                reader = csv.DictReader(TextIOWrapper(f, 'utf-8'))
+                batch = []
+                for row in reader:
+                    batch.append(row)
+                    if len(batch) >= batch_size:
+                        count, err = self._upsert_rels_batch(batch)
+                        rels_restored += count
+                        if err:
+                            errors.append(err)
+                        batch = []
+                if batch:
+                    count, err = self._upsert_rels_batch(batch)
+                    rels_restored += count
+                    if err:
+                        errors.append(err)
+            
+            # Read Metadata
+            try:
+                with zf.open('metadata.json') as f:
+                    metadata = json.load(f)
+            except Exception:
+                metadata = {}
+        
+        result = {
+            "nodes_restored": nodes_restored,
+            "relationships_restored": rels_restored,
+            "errors": errors,
+            "original_metadata": metadata
+        }
+        
+        logger.info(f"Restore completed: {nodes_restored} nodes, {rels_restored} relationships")
+        return result
+
+    def _upsert_nodes_batch(self, rows: List[Dict]) -> tuple:
+        """Upsert a batch of nodes from CSV rows."""
+        nodes_to_store = []
+        for row in rows:
+            id_val = row.get('id', '').strip()
+            if not id_val:
+                continue
+            
+            labels_str = row.get('labels', 'Entity')
+            labels_list = [l.strip() for l in labels_str.split(';') if l.strip()]
+            # Use second label as the type label (first is always 'Entity')
+            type_label = labels_list[1] if len(labels_list) > 1 else 'UNKNOWN'
+            
+            nodes_to_store.append({
+                "label": type_label,
+                "properties": {
+                    "id": id_val,
+                    "entity_type": row.get('entity_type', ''),
+                    "entity_role": row.get('entity_role', ''),
+                }
+            })
+        
+        if not nodes_to_store:
+            return 0, None
+        
+        query = """
+        UNWIND $nodes as node
+        MERGE (e:Entity {id: node.properties.id})
+        ON CREATE SET e = node.properties
+        ON MATCH SET e += node.properties
+        WITH e, node
+        CALL apoc.create.addLabels(e, [node.label]) YIELD node as ignored
+        RETURN count(e) as node_count
+        """
+        try:
+            result = self.graph_db.query(query, params={"nodes": nodes_to_store})
+            return result[0]['node_count'], None
+        except Exception as e:
+            logger.error(f"Error restoring nodes batch: {e}")
+            return 0, str(e)
+
+    def _upsert_rels_batch(self, rows: List[Dict]) -> tuple:
+        """Upsert a batch of relationships from CSV rows."""
+        rels_by_type = defaultdict(list)
+        for row in rows:
+            source = row.get('source', '').strip()
+            target = row.get('target', '').strip()
+            rel_type = row.get('type', '').strip()
+            if source and target and rel_type:
+                rels_by_type[rel_type].append({"source": source, "target": target})
+        
+        total = 0
+        for rel_type, rels_data in rels_by_type.items():
+            query = f"""
+            UNWIND $rels_data as rel
+            MATCH (source:Entity {{id: rel.source}})
+            MATCH (target:Entity {{id: rel.target}})
+            MERGE (source)-[r:`{rel_type}`]->(target)
+            RETURN count(r) as rel_count
+            """
+            try:
+                result = self.graph_db.query(query, params={"rels_data": rels_data})
+                total += result[0]['rel_count']
+            except Exception as e:
+                logger.error(f"Error restoring relationships of type '{rel_type}': {e}")
+                return total, str(e)
+        
+        return total, None
 
 
 class QdrantEmbedStorage:
@@ -203,8 +469,6 @@ class QdrantEmbedStorage:
         Returns:
             int: Number of chunks successfully stored.
         """
-        from src.models import VectorPoint
-        
         points: List[VectorPoint] = []
         
         for chunk in chunks:
@@ -226,8 +490,6 @@ class QdrantEmbedStorage:
     
     def _format_chunk(self, chunk: Union[Dict[str, Any], Any], doc_id: Optional[str]) -> Optional['VectorPoint']:
         """Format chunk into VectorPoint for Qdrant storage"""
-        from src.models import VectorPoint
-        
         content = getattr(chunk, "content", None) or chunk.get("content", "")
         if not content or not str(content).strip():
             return None
