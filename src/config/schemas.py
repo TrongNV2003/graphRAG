@@ -22,6 +22,9 @@ class IndexingResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, description="The natural language query")
+    top_k: int = Field(5, ge=1, le=50, description="Maximum number of chunk results to return")
+    threshold: float = Field(0.0, ge=0.0, le=1.0, description="Similarity threshold for filtering chunk results")
+    graph_limit: int = Field(10, ge=1, le=50, description="Maximum number of graph results to return")
 
 
 class QueryResponse(BaseModel):

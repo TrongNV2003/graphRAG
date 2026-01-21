@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from langchain_neo4j import Neo4jGraph
 
 from src.api.dependencies import get_neo4j_graph
-from src.services.visualization import visualize_knowledge_graph
+from src.services.visualize_service import visualize_knowledge_graph
 
 router = APIRouter()
 

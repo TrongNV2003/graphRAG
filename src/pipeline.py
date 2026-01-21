@@ -4,8 +4,8 @@ from langchain_neo4j import Neo4jGraph
 
 from src.config.dataclass import StructuralChunk
 from src.processing.dataloaders import DataLoader
-from src.services.indexing import GraphIndexing
-from src.services.querying import GraphQuerying
+from src.services.index_service import GraphIndexing
+from src.services.query_service import GraphQuerying
 from src.config.setting import neo4j_config, api_config
 
 
@@ -62,5 +62,5 @@ class Pipeline:
 
     def visualize_knowledge_graph(self, limit: int = 100):
         """Visualize the knowledge graph."""
-        from src.services.visualization import visualize_knowledge_graph
+        from src.services.visualize_service import visualize_knowledge_graph
         visualize_knowledge_graph(self.graph_db, limit=limit)

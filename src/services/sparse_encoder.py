@@ -2,7 +2,7 @@
 
 import logging
 from typing import List, Optional
-from src.models import SparseVector
+from src.config.dataclass import SparseVector
 
 logger = logging.getLogger(__name__)
 

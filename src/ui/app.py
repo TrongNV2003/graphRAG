@@ -4,11 +4,11 @@ import streamlit.components.v1 as components
 from openai import OpenAI
 from langchain_neo4j import Neo4jGraph
 
-from src.config.setting import api_config, neo4j_config
 from src.processing.dataloaders import DataLoader
-from src.services.indexing import GraphIndexing
-from src.services.querying import GraphQuerying
-from src.services.visualization import visualize_knowledge_graph
+from src.services.index_service import GraphIndexing
+from src.services.query_service import GraphQuerying
+from src.config.setting import api_config, neo4j_config
+from src.services.visualize_service import visualize_knowledge_graph
 
 
 st.set_page_config(

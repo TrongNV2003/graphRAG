@@ -1,7 +1,7 @@
 import logging
 from typing import List, Dict, Any, Optional
 
-from src.models import VectorPoint, SearchResult
+from src.config.dataclass import VectorPoint, SearchResult
 from src.config.setting import qdrant_config
 
 logger = logging.getLogger(__name__)

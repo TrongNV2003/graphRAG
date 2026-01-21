@@ -4,7 +4,7 @@ from openai import OpenAI
 
 from src.api.dependencies import get_openai_client, get_neo4j_graph
 from src.config.schemas import QueryRequest, SearchRequest, QueryResponse
-from src.services.querying import GraphQuerying
+from src.services.query_service import GraphQuerying
 
 router = APIRouter()
 
@@ -19,7 +19,12 @@ async def query_knowledge_graph(
         querying_service = GraphQuerying(client=client, graph_db=graph_db)
         
         # Use the new detailed response method
-        result = querying_service.response_detailed(query=request.query)
+        result = querying_service.response_detailed(
+            query=request.query,
+            top_k=request.top_k,
+            threshold=request.threshold,
+            graph_limit=request.graph_limit
+        )
         
         return QueryResponse(
             answer=result["answer"],

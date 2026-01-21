@@ -8,6 +8,17 @@ from pydantic_settings import BaseSettings
 load_dotenv(override=True)
 
 
+class Settings(BaseSettings):
+    app_name: str = "HybridRAG"
+    app_description: str = "API for HybridRAG system combining Knowledge Graph and Vector Database"
+    app_version: str = "1.0.0"
+    debug: bool = False
+
+    api_v1_prefix: str = "/api/v1"
+    
+    log_level: str = "INFO"
+
+
 class APIConfig(BaseSettings):
     base_url: Optional[str] = Field(
         default=None,
@@ -23,6 +34,7 @@ class APIConfig(BaseSettings):
         description="API key for OpenAI API",
         alias="OPENAI_API_KEY",
     )
+
 
 class LLMTaskParams(BaseModel):
     max_tokens: int = Field(default=8192, description="Maximum number of tokens for API responses")
@@ -72,6 +84,7 @@ class LLMConfig(BaseSettings):
     class Config:
         env_nested_delimiter = '_'
 
+
 class Neo4jConfig(BaseSettings):
     username: str = Field(..., alias="NEO4J_USERNAME")
     password: str = Field(..., alias="NEO4J_PASSWORD")
@@ -81,6 +94,7 @@ class Neo4jConfig(BaseSettings):
         driver = GraphDatabase.driver(self.url, auth=(self.username, self.password))
         driver.verify_connectivity()
         return driver
+
 
 class EmbeddingModelConfig(BaseSettings):
     embedder_model: str = Field(
@@ -127,7 +141,7 @@ class RetrievalConfig(BaseSettings):
         alias="FUZZY_MIN_SCORE"
     )
 
-
+settings = Settings()
 api_config = APIConfig()
 llm_config = LLMConfig()
 neo4j_config = Neo4jConfig()

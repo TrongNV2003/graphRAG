@@ -599,7 +599,7 @@ class TwoPhaseDocumentChunker:
     def _recursive_split_chunk(self, chunk: StructuralChunk) -> List[StructuralChunk]:
         sub_chunks = []
         
-        split_texts = self._recursive_chunking(
+        split_texts = self._perform_text_splitting(
             text=chunk.content,
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap
@@ -625,7 +625,7 @@ class TwoPhaseDocumentChunker:
         
         return sub_chunks
 
-    def _recursive_chunking(self, text: str, chunk_size: int = 512, chunk_overlap: int = 0) -> List[str]:
+    def _perform_text_splitting(self, text: str, chunk_size: int = 512, chunk_overlap: int = 0) -> List[str]:
         if not text:
             return []
             

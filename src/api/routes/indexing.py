@@ -5,7 +5,7 @@ from typing import List
 
 from src.api.dependencies import get_openai_client, get_neo4j_graph, get_data_loader
 from src.config.schemas import WikipediaIndexRequest, IndexingResponse
-from src.services.indexing import GraphIndexing
+from src.services.index_service import GraphIndexing
 from src.config.dataclass import StructuralChunk
 
 router = APIRouter()
