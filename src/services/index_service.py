@@ -50,7 +50,7 @@ class GraphIndexing:
 
     def indexing(self, chunks: List['StructuralChunk']) -> None:
         """Index pre-chunked data into the graph database."""
-        batch_size = 3
+        batch_size = 5
         all_nodes: List[Dict] = []
         all_relationships: List[Dict] = []
         batch_nodes: List[Dict] = []
@@ -150,8 +150,6 @@ class GraphIndexing:
             if key not in seen:
                 seen.add(key)
                 deduplicated.append(entity)
-            else:
-                logger.debug(f"Duplicate entity skipped: {key}")
         
         return deduplicated
 

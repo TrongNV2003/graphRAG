@@ -70,39 +70,58 @@ class GraphQuerying:
         answer_text = response.get("answer", "No answer generated.")
         return answer_text
 
-    def response_detailed(self, query: str) -> dict:
+    def response_detailed(self, query: str, top_k: int = 5, threshold: float = 0.0, graph_limit: int = 10) -> dict:
         """Generate a response to the query using graph retrieval and LLM generation, returning detailed context.
         
         Args:
             query: The input query string.
+            top_k: Top K results for chunk retrieval.
+            threshold: Similarity threshold for chunk retrieval.
+            graph_limit: Limit for graph retrieval.
             
         Returns:
             dict: The generated response containing answer, graph_context, and chunk_context.
         """
-        target_entities, excluded_entities, normalized_query = self._analyze_query(query)
+        # Save original settings
+        original_chunk_top_k = self.retriever.chunk_retrieval.top_k
+        original_chunk_threshold = self.retriever.chunk_retrieval.threshold
+        original_graph_limit = self.retriever.graph_retrieval.graph_limit
         
-        retrieved_results = self.retriever.retrieve(
-            query=normalized_query,
-            target_entities=target_entities,
-            excluded_entities=excluded_entities
-        )
+        # Apply new settings
+        self.retriever.chunk_retrieval.top_k = top_k
+        self.retriever.chunk_retrieval.threshold = threshold
+        self.retriever.graph_retrieval.graph_limit = graph_limit
         
-        graph_context = self._format_graph_context(retrieved_results["graph"])
-        chunk_context = self._format_chunk_context(retrieved_results["chunk"])
-        
-        response = self.generator.call(
-            query=query,
-            graph_context=graph_context,
-            chunk_context=chunk_context
-        )
-        
-        answer_text = response.get("answer", "No answer generated.")
-        
-        return {
-            "answer": answer_text,
-            "graph_context": retrieved_results["graph"],
-            "chunk_context": retrieved_results["chunk"]
-        }
+        try:
+            target_entities, excluded_entities, normalized_query = self._analyze_query(query)
+            
+            retrieved_results = self.retriever.retrieve(
+                query=normalized_query,
+                target_entities=target_entities,
+                excluded_entities=excluded_entities
+            )
+            
+            graph_context = self._format_graph_context(retrieved_results["graph"])
+            chunk_context = self._format_chunk_context(retrieved_results["chunk"])
+            
+            response = self.generator.call(
+                query=query,
+                graph_context=graph_context,
+                chunk_context=chunk_context
+            )
+            
+            answer_text = response.get("answer", "No answer generated.")
+            
+            return {
+                "answer": answer_text,
+                "graph_context": retrieved_results["graph"],
+                "chunk_context": retrieved_results["chunk"]
+            }
+        finally:
+            # Restore original settings
+            self.retriever.chunk_retrieval.top_k = original_chunk_top_k
+            self.retriever.chunk_retrieval.threshold = original_chunk_threshold
+            self.retriever.graph_retrieval.graph_limit = original_graph_limit
     
     def _analyze_query(self, query: str) -> dict:
         """Analyze the query to extract entities and relations using the LLM.
