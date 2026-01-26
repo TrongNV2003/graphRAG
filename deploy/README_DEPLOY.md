@@ -9,15 +9,21 @@ sudo snap install docker
 
 ### Setup Docker Daemon
 ```bash
-# 1. Create group docker
+# 1. Modify socket ownership access
+sudo chown root:docker /var/run/docker.sock
+
+# 2. Create group docker
 sudo groupadd docker
 
-# 2. Add user to docker group
+# 3. Add user to docker group
 sudo usermod -aG docker $USER
 
-# 3. Logout and Login again
+# 4. Logout and Login again
 # Or run this command to apply in current terminal:
 newgrp docker
+
+# 5. Re-check
+docker ps
 ```
 
 ---
