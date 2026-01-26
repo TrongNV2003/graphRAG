@@ -5,9 +5,10 @@ from typing import Optional, Any
 from abc import ABC, abstractmethod
 
 from openai import OpenAI
+from src.core.factory import LLMClientFactory
 
 from src.config.datatype import RoleType
-from src.config.setting import api_config, llm_config
+from src.config.setting import llm_config
 
 
 class PromptMixin:
@@ -62,17 +63,7 @@ class EntityExtractionLLM(BaseLLM):
         client: Optional[OpenAI] = None,
     ) -> None:
         if client is None:
-            is_openai_model = llm_config.llm_model.lower().startswith(("gpt-", "o1-", "openai/"))
-            
-            if is_openai_model and api_config.openai_api_key:
-                logger.info(f"Using OpenAI API for model: {llm_config.llm_model}")
-                client = OpenAI(api_key=api_config.openai_api_key)
-            else:
-                logger.info(f"Using Custom API for model: {llm_config.llm_model}")
-                client = OpenAI(
-                    api_key=api_config.api_key or "EMPTY", 
-                    base_url=api_config.base_url
-                )
+            client = LLMClientFactory.create_sync_client()
 
         super().__init__(client, prompt_template, system_prompt)
         
@@ -128,17 +119,7 @@ class GenerationResponseLLM(BaseLLM):
         client: Optional[OpenAI] = None,
     ) -> None:
         if client is None:
-            is_openai_model = llm_config.llm_model.lower().startswith(("gpt-", "o1-", "openai/"))
-            
-            if is_openai_model and api_config.openai_api_key:
-                logger.info(f"Using OpenAI API for model: {llm_config.llm_model}")
-                client = OpenAI(api_key=api_config.openai_api_key)
-            else:
-                logger.info(f"Using Custom API for model: {llm_config.llm_model}")
-                client = OpenAI(
-                    api_key=api_config.api_key or "EMPTY", 
-                    base_url=api_config.base_url
-                )
+            client = LLMClientFactory.create_sync_client()
 
         super().__init__(client, prompt_template, system_prompt)
 
@@ -182,17 +163,7 @@ class AnalysisQueryLLM(BaseLLM):
         json_schema: Optional[dict] = None,
     ) -> None:
         if client is None:
-            is_openai_model = llm_config.llm_model.lower().startswith(("gpt-", "o1-", "openai/"))
-            
-            if is_openai_model and api_config.openai_api_key:
-                logger.info(f"Using OpenAI API for model: {llm_config.llm_model}")
-                client = OpenAI(api_key=api_config.openai_api_key)
-            else:
-                logger.info(f"Using Custom API for model: {llm_config.llm_model}")
-                client = OpenAI(
-                    api_key=api_config.api_key or "EMPTY", 
-                    base_url=api_config.base_url
-                )
+            client = LLMClientFactory.create_sync_client()
 
         super().__init__(client, prompt_template, system_prompt)
         self.json_schema = json_schema

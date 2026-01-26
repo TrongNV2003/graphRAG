@@ -8,8 +8,6 @@ from src.engines.llm import EntityExtractionLLM
 from src.processing.chunking import TwoPhaseDocumentChunker
 from src.core.storage import GraphStorage, QdrantEmbedStorage
 from src.processing.postprocessing import EntityPostprocessor
-from src.prompts.ner_prompt import EXTRACT_SYSTEM_PROMPT, EXTRACT_PROMPT_TEMPLATE, EXTRACT_SCHEMA
-from src.config.setting import llm_config
 
 
 class GraphIndexing:
@@ -17,32 +15,21 @@ class GraphIndexing:
         self,
         client: OpenAI,
         graph_db: Neo4jGraph,
-        chunk_size: int = 2048,
+        chunker: TwoPhaseDocumentChunker,
+        extractor: EntityExtractionLLM,
+        postprocessor: EntityPostprocessor,
+        storage: GraphStorage,
+        qdrant_storage: QdrantEmbedStorage,
         clear_old_graph: bool = False
     ):
         self.client = client
         self.graph_db = graph_db
-        self.chunk_size = chunk_size
+        self.chunker = chunker
+        self.storage = storage
+        self.extractor = extractor
+        self.postprocessor = postprocessor
+        self.qdrant_storage = qdrant_storage
         self.clear_old_graph = clear_old_graph
-        
-        self.chunker = TwoPhaseDocumentChunker(
-            chunk_size=self.chunk_size,
-            tokenize_model=llm_config.llm_model,
-            verbose=False
-        )
-        
-        self.extractor = EntityExtractionLLM(
-            client=self.client,
-            system_prompt=EXTRACT_SYSTEM_PROMPT,
-            prompt_template=EXTRACT_PROMPT_TEMPLATE,
-            json_schema=EXTRACT_SCHEMA,
-        )
-        
-        self.postprocessor = EntityPostprocessor()
-        
-        self.storage = GraphStorage(self.graph_db)
-        
-        self.qdrant_storage = QdrantEmbedStorage()
 
     def chunking(self, document: dict, max_new_chunk_size: Optional[int] = None) -> List['StructuralChunk']:
         chunks = self.chunker.chunk_document(document, max_new_chunk_size=max_new_chunk_size)

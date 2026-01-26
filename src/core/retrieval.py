@@ -23,13 +23,16 @@ class GraphRetrieval(BaseRetrieval):
     Graph retrieval with nodes + relationships.
     Args:
         graph_db: Neo4jGraph instance
-        graph_limit: Maximum number of graph to retrieve
     """
-    def __init__(self, graph_db: Neo4jGraph, graph_limit: int = 10):
+    def __init__(self, graph_db: Neo4jGraph):
         super().__init__(graph_db)
-        self.graph_limit = graph_limit
 
-    def retrieve(self, target_entities: List[str], excluded_entities: Optional[List[str]] = None) -> List[Dict]:
+    def retrieve(
+        self,
+        target_entities: List[str],
+        excluded_entities: Optional[List[str]] = None,
+        graph_limit: int = 10
+    ) -> List[Dict]:
         """Retrieve relevant graph based on the entities list, excluding specified entities.
         
         Strategy:
@@ -40,6 +43,7 @@ class GraphRetrieval(BaseRetrieval):
         Args:
             target_entities: List of entity names to search in graph DB
             excluded_entities: List of entity names to exclude from results
+            graph_limit: Maximum number of graph to retrieve
         Returns:
             List of graph triples as dicts
         """
@@ -50,19 +54,19 @@ class GraphRetrieval(BaseRetrieval):
         excluded_lower = [e.lower() for e in excluded_entities] if excluded_entities else []
         
         # Exact Match
-        results = self._query_exact_match(target_entities, excluded_lower)
+        results = self._query_exact_match(target_entities, excluded_lower, graph_limit)
         if results:
             logger.debug(f"Exact match found {len(results)} results")
             return results
         
         # Fulltext Fuzzy Search
-        results = self._query_fulltext(target_entities, excluded_lower)
+        results = self._query_fulltext(target_entities, excluded_lower, graph_limit)
         if results:
             logger.info(f"Fulltext fuzzy search found {len(results)} results")
             return results
         
         # Substring (CONTAINS) Fallback
-        results = self._query_contains(target_entities, excluded_lower)
+        results = self._query_contains(target_entities, excluded_lower, graph_limit)
         if results:
             logger.info(f"Substring match found {len(results)} results")
         else:
@@ -81,7 +85,7 @@ class GraphRetrieval(BaseRetrieval):
         # Combine prefix match and fuzzy match (edit distance 1)
         return f"{escaped}* OR {escaped}~1"
 
-    def _query_fulltext(self, target_entities: List[str], excluded_lower: List[str]) -> List[Dict]:
+    def _query_fulltext(self, target_entities: List[str], excluded_lower: List[str], graph_limit: int) -> List[Dict]:
         """Query using Neo4j fulltext index for fuzzy matching."""
         from src.config.setting import retrieval_config
         
@@ -110,7 +114,7 @@ class GraphRetrieval(BaseRetrieval):
                     "lucene_query": lucene_query,
                     "min_score": retrieval_config.fuzzy_min_score,
                     "excluded": excluded_lower,
-                    "limit": self.graph_limit
+                    "limit": graph_limit
                 }
                 
                 results = self._query_graph(cypher, params)
@@ -125,13 +129,13 @@ class GraphRetrieval(BaseRetrieval):
                     seen.add(key)
                     unique_results.append(r)
             
-            return unique_results[:self.graph_limit]
+            return unique_results[:graph_limit]
             
         except Exception as e:
             logger.warning(f"Fulltext search failed: {e}. Falling back to substring match.")
             return []
 
-    def _query_exact_match(self, target_entities: List[str], excluded_lower: List[str]) -> List[Dict]:
+    def _query_exact_match(self, target_entities: List[str], excluded_lower: List[str], graph_limit: int) -> List[Dict]:
         """Query with exact match on id/entity_role."""
         exclusion_clause = ""
         if excluded_lower:
@@ -154,10 +158,15 @@ class GraphRetrieval(BaseRetrieval):
         LIMIT $limit
         """
         
-        params = {"entities": target_entities, "excluded": excluded_lower, "limit": self.graph_limit}
+        params = {
+            "entities": target_entities,
+            "excluded": excluded_lower,
+            "limit": graph_limit
+        }
+
         return self._query_graph(cypher, params)
 
-    def _query_contains(self, target_entities: List[str], excluded_lower: List[str]) -> List[Dict]:
+    def _query_contains(self, target_entities: List[str], excluded_lower: List[str], graph_limit: int) -> List[Dict]:
         """Query with substring (CONTAINS) matching as final fallback."""
         exclusion_clause = ""
         if excluded_lower:
@@ -180,7 +189,12 @@ class GraphRetrieval(BaseRetrieval):
         LIMIT $limit
         """
         
-        params = {"entities": target_entities, "excluded": excluded_lower, "limit": self.graph_limit}
+        params = {
+            "entities": target_entities,
+            "excluded": excluded_lower,
+            "limit": graph_limit
+        }
+
         return self._query_graph(cypher, params)
 
     def _query_graph(self, cypher: str, params: Optional[Dict] = None) -> List[Dict]:
@@ -194,8 +208,6 @@ class QdrantChunkRetrieval(BaseRetrieval):
         graph_db: Neo4jGraph instance (used for loading chunks if needed)
         vector_store: QdrantVectorStore instance
         collection_name: Qdrant collection name
-        top_k: Maximum number of results to return
-        threshold: Minimum similarity score threshold
         auto_build: Whether to auto-create collection on init
     """
     def __init__(
@@ -203,15 +215,11 @@ class QdrantChunkRetrieval(BaseRetrieval):
         graph_db: Neo4jGraph,
         vector_store: Optional[QdrantVectorStore] = None,
         collection_name: Optional[str] = None,
-        top_k: int = 5,
-        threshold: float = 0.0,
         auto_build: bool = True,
     ):
         super().__init__(graph_db)
         self.vector_store = vector_store or create_qdrant_store()
         self.collection_name = collection_name or qdrant_config.collection_name
-        self.top_k = top_k
-        self.threshold = threshold
         
         # Dense encoder (singleton)
         self.dense_encoder = get_dense_encoder()
@@ -240,11 +248,13 @@ class QdrantChunkRetrieval(BaseRetrieval):
             )
             logger.info(f"Created Qdrant collection: {self.collection_name}")
     
-    def retrieve(self, query: str) -> List[Dict]:
+    def retrieve(self, query: str, top_k: int = 5, threshold: float = 0.0) -> List[Dict]:
         """Retrieve relevant chunks using hybrid search.
         
         Args:
             query: Search query text
+            top_k: Maximum number of results to return
+            threshold: Minimum similarity score threshold
             
         Returns:
             List of chunk dicts with scores
@@ -261,8 +271,8 @@ class QdrantChunkRetrieval(BaseRetrieval):
             query_vector=query_vector,
             sparse_indices=sparse_result.indices,
             sparse_values=sparse_result.values,
-            top_k=self.top_k,
-            threshold=self.threshold if self.threshold > 0 else None
+            top_k=top_k,
+            threshold=threshold if threshold > 0 else None
         )
         
         # Format results
@@ -277,11 +287,13 @@ class QdrantChunkRetrieval(BaseRetrieval):
         
         return formatted_results
 
-    def semantic_search(self, query: str) -> List[Dict]:
+    def semantic_search(self, query: str, top_k: int = 5, threshold: float = 0.0) -> List[Dict]:
         """Retrieve relevant chunks using dense vector search only (no sparse/keyword).
         
         Args:
             query: Search query text
+            top_k: Maximum number of results to return
+            threshold: Minimum similarity score threshold
             
         Returns:
             List of chunk dicts with scores
@@ -293,8 +305,8 @@ class QdrantChunkRetrieval(BaseRetrieval):
         results = self.vector_store.search(
             collection=self.collection_name,
             vector=query_vector,
-            top_k=self.top_k,
-            threshold=self.threshold if self.threshold > 0 else None
+            top_k=top_k,
+            threshold=threshold if threshold > 0 else None
         )
         
         # Format results
@@ -316,42 +328,45 @@ class HybridRetrieval:
     Args:
         graph_db: Neo4jGraph instance
         vector_store: QdrantVectorStore instance (optional)
-        graph_limit: Maximum number of graph results
-        chunk_top_k: Maximum number of chunk results
-        chunk_threshold: Minimum similarity score threshold for chunks
         auto_build: Whether to auto-create Qdrant collection on init
     """
     def __init__(
         self,
         graph_db: Neo4jGraph,
         vector_store: Optional[QdrantVectorStore] = None,
-        graph_limit: int = 10,
-        chunk_top_k: int = 10,
-        chunk_threshold: float = 0.0,
         auto_build: bool = True,
     ):
-        self.graph_retrieval = GraphRetrieval(graph_db=graph_db, graph_limit=graph_limit)
+        self.graph_retrieval = GraphRetrieval(graph_db=graph_db)
         self.chunk_retrieval = QdrantChunkRetrieval(
             graph_db=graph_db,
             vector_store=vector_store,
-            top_k=chunk_top_k,
-            threshold=chunk_threshold,
             auto_build=auto_build
         )
 
-    def retrieve(self, query: str, target_entities: List[str], excluded_entities: Optional[List[str]] = None) -> Dict[str, List[Dict]]:
+    def retrieve(
+        self, 
+        query: str, 
+        target_entities: List[str], 
+        excluded_entities: Optional[List[str]] = None,
+        graph_limit: int = 10,
+        chunk_top_k: int = 5,
+        chunk_threshold: float = 0.0
+    ) -> Dict[str, List[Dict]]:
         """Hybrid retrieval combining graph triples and semantic chunks.
         
         Args:
             query: Search query text for semantic chunk retrieval
             target_entities: List of entity names for graph retrieval
             excluded_entities: List of entity names to exclude from graph results
+            graph_limit: Optional override for graph limit
+            chunk_top_k: Optional override for chunk top_k
+            chunk_threshold: Optional override for chunk threshold
             
         Returns:
             Dict with 'graph' and 'chunk' keys
         """
-        graph_results = self.graph_retrieval.retrieve(target_entities, excluded_entities)
-        chunk_results = self.chunk_retrieval.retrieve(query)
+        graph_results = self.graph_retrieval.retrieve(target_entities, excluded_entities, graph_limit=graph_limit)
+        chunk_results = self.chunk_retrieval.retrieve(query, top_k=chunk_top_k, threshold=chunk_threshold)
         
         return {
             "graph": graph_results,

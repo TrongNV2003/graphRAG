@@ -5,6 +5,7 @@ from langchain_neo4j import Neo4jGraph
 from typing import Any, Dict, List, Optional, Union
 
 from src.config.dataclass import VectorPoint
+from src.engines.qdrant import QdrantVectorStore
 from src.services.dense_encoder import get_dense_encoder
 
 class GraphStorage:
@@ -425,14 +426,14 @@ class QdrantEmbedStorage:
     """
     def __init__(
         self,
+        vector_store: Optional[QdrantVectorStore] = None,
         collection_name: Optional[str] = None,
         auto_create: bool = True
     ):
         from src.engines.qdrant import create_qdrant_store
-        from src.services.sparse_encoder import get_sparse_encoder
         from src.config.setting import qdrant_config
         
-        self.vector_store = create_qdrant_store()
+        self.vector_store = vector_store or create_qdrant_store()
         self.collection_name = collection_name or qdrant_config.collection_name
         self.embedder = get_dense_encoder()
         self._sparse_encoder = None

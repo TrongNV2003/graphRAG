@@ -1,45 +1,20 @@
 from loguru import logger
-from openai import OpenAI
 from typing import List, Dict
-from langchain_neo4j import Neo4jGraph
 
 from src.core.retrieval import HybridRetrieval
 from src.engines.llm import AnalysisQueryLLM, GenerationResponseLLM
-from src.prompts.analysis_prompt import ANALYZE_SYSTEM_PROMPT, ANALYZE_PROMPT_TEMPLATE, ANALYZE_SCHEMA
-from src.prompts.response_prompt import ANSWERING_SYSTEM_PROMPT, ANSWERING_PROMPT_TEMPLATE
 
 
 class GraphQuerying:
     def __init__(
         self,
-        client: OpenAI,
-        graph_db: Neo4jGraph,
-        answering_prompt_template: str = ANSWERING_PROMPT_TEMPLATE,
-        answering_prompt_system: str = ANSWERING_SYSTEM_PROMPT,
-        analyze_prompt_template: str = ANALYZE_PROMPT_TEMPLATE,
-        analyze_prompt_system: str = ANALYZE_SYSTEM_PROMPT,
-        analyze_schema: dict = ANALYZE_SCHEMA,
+        retriever: HybridRetrieval,
+        generator: GenerationResponseLLM,
+        analyzer: AnalysisQueryLLM
     ):
-        self.retriever = HybridRetrieval(
-            graph_db,
-            graph_limit=10,
-            chunk_top_k=5,
-            chunk_threshold=0.0,
-            auto_build=True
-        )
-        
-        self.generator = GenerationResponseLLM(
-            client=client,
-            prompt_template=answering_prompt_template,
-            system_prompt=answering_prompt_system,
-        )
-        
-        self.analyzer = AnalysisQueryLLM(
-            client=client,
-            prompt_template=analyze_prompt_template,
-            system_prompt=analyze_prompt_system,
-            json_schema=analyze_schema
-        )
+        self.retriever = retriever
+        self.generator = generator
+        self.analyzer = analyzer
     
     def response(self, query: str) -> str:
         """Generate a response to the query using graph retrieval and LLM generation.
@@ -82,55 +57,42 @@ class GraphQuerying:
         Returns:
             dict: The generated response containing answer, graph_context, and chunk_context.
         """
-        # Save original settings
-        original_chunk_top_k = self.retriever.chunk_retrieval.top_k
-        original_chunk_threshold = self.retriever.chunk_retrieval.threshold
-        original_graph_limit = self.retriever.graph_retrieval.graph_limit
+        target_entities, excluded_entities, normalized_query = self._analyze_query(query)
         
-        # Apply new settings
-        self.retriever.chunk_retrieval.top_k = top_k
-        self.retriever.chunk_retrieval.threshold = threshold
-        self.retriever.graph_retrieval.graph_limit = graph_limit
+        retrieved_results = self.retriever.retrieve(
+            query=normalized_query,
+            target_entities=target_entities,
+            excluded_entities=excluded_entities,
+            graph_limit=graph_limit,
+            chunk_top_k=top_k,
+            chunk_threshold=threshold
+        )
         
-        try:
-            target_entities, excluded_entities, normalized_query = self._analyze_query(query)
-            
-            retrieved_results = self.retriever.retrieve(
-                query=normalized_query,
-                target_entities=target_entities,
-                excluded_entities=excluded_entities
-            )
-            
-            graph_context = self._format_graph_context(retrieved_results["graph"])
-            chunk_context = self._format_chunk_context(retrieved_results["chunk"])
-            
-            response = self.generator.call(
-                query=query,
-                graph_context=graph_context,
-                chunk_context=chunk_context
-            )
-            
-            answer_text = response.get("answer", "No answer generated.")
-            
-            return {
-                "answer": answer_text,
-                "graph_context": retrieved_results["graph"],
-                "chunk_context": retrieved_results["chunk"]
-            }
-        finally:
-            # Restore original settings
-            self.retriever.chunk_retrieval.top_k = original_chunk_top_k
-            self.retriever.chunk_retrieval.threshold = original_chunk_threshold
-            self.retriever.graph_retrieval.graph_limit = original_graph_limit
+        graph_context = self._format_graph_context(retrieved_results["graph"])
+        chunk_context = self._format_chunk_context(retrieved_results["chunk"])
+        
+        response = self.generator.call(
+            query=query,
+            graph_context=graph_context,
+            chunk_context=chunk_context
+        )
+        
+        answer_text = response.get("answer", "No answer generated.")
+        
+        return {
+            "answer": answer_text,
+            "graph_context": retrieved_results["graph"],
+            "chunk_context": retrieved_results["chunk"]
+        }
     
-    def _analyze_query(self, query: str) -> dict:
+    def _analyze_query(self, query: str) -> tuple:
         """Analyze the query to extract entities and relations using the LLM.
         
         Args:
             query: The input query string.
             
         Returns:
-            dict: The analysis result containing extracted entities and relations.
+            tuple: A tuple containing target_entities, excluded_entities, and normalized_query.
         """
         analysis = self.analyzer.call(query=query)
         
@@ -199,18 +161,11 @@ class GraphQuerying:
 
     def semantic_response(self, query: str, top_k: int = 5, threshold: float = 0.0) -> dict:
         """Generate answer using Semantic Search (Dense vector) only."""
-        # Override top_k and threshold
-        original_top_k = self.retriever.chunk_retrieval.top_k
-        original_threshold = self.retriever.chunk_retrieval.threshold
-        
-        self.retriever.chunk_retrieval.top_k = top_k
-        self.retriever.chunk_retrieval.threshold = threshold
-        
-        try:
-            chunks = self.retriever.chunk_retrieval.semantic_search(query)
-        finally:
-             self.retriever.chunk_retrieval.top_k = original_top_k
-             self.retriever.chunk_retrieval.threshold = original_threshold
+        chunks = self.retriever.chunk_retrieval.semantic_search(
+            query=query, 
+            top_k=top_k, 
+            threshold=threshold
+        )
             
         # Format context
         chunk_context = self._format_chunk_context(chunks)
@@ -232,17 +187,11 @@ class GraphQuerying:
 
     def hybrid_response(self, query: str, top_k: int = 5, threshold: float = 0.0) -> dict:
         """Generate answer using Hybrid Search (Qdrant Dense+Sparse) only."""
-        original_top_k = self.retriever.chunk_retrieval.top_k
-        original_threshold = self.retriever.chunk_retrieval.threshold
-
-        self.retriever.chunk_retrieval.top_k = top_k
-        self.retriever.chunk_retrieval.threshold = threshold
-        
-        try:
-            chunks = self.retriever.chunk_retrieval.retrieve(query)
-        finally:
-            self.retriever.chunk_retrieval.top_k = original_top_k
-            self.retriever.chunk_retrieval.threshold = original_threshold
+        chunks = self.retriever.chunk_retrieval.retrieve(
+            query=query,
+            top_k=top_k,
+            threshold=threshold
+        )
             
         # Format context
         chunk_context = self._format_chunk_context(chunks)
@@ -275,23 +224,16 @@ class GraphQuerying:
         Returns:
             dict: Search results with chunks and total count.
         """
-        # Override top_k and threshold
-        original_top_k = self.retriever.chunk_retrieval.top_k
-        original_threshold = self.retriever.chunk_retrieval.threshold
-
-        self.retriever.chunk_retrieval.top_k = top_k
-        self.retriever.chunk_retrieval.threshold = threshold
-        
-        try:
-            chunks = self.retriever.chunk_retrieval.semantic_search(query)
-            return {
-                "chunks": chunks,
-                "total": len(chunks),
-                "search_type": "semantic"
-            }
-        finally:
-            self.retriever.chunk_retrieval.top_k = original_top_k
-            self.retriever.chunk_retrieval.threshold = original_threshold
+        chunks = self.retriever.chunk_retrieval.semantic_search(
+            query=query,
+            top_k=top_k,
+            threshold=threshold
+        )
+        return {
+            "chunks": chunks,
+            "total": len(chunks),
+            "search_type": "semantic"
+        }
 
     def hybrid_search(self, query: str, top_k: int = 5, threshold: float = 0.0) -> dict:
         """Perform hybrid search (dense + sparse vectors via Qdrant).
@@ -304,20 +246,13 @@ class GraphQuerying:
         Returns:
             dict: Search results with chunks and total count.
         """
-        # Override top_k and threshold
-        original_top_k = self.retriever.chunk_retrieval.top_k
-        original_threshold = self.retriever.chunk_retrieval.threshold
-
-        self.retriever.chunk_retrieval.top_k = top_k
-        self.retriever.chunk_retrieval.threshold = threshold
-        
-        try:
-            chunks = self.retriever.chunk_retrieval.retrieve(query)
-            return {
-                "chunks": chunks,
-                "total": len(chunks),
-                "search_type": "hybrid"
-            }
-        finally:
-            self.retriever.chunk_retrieval.top_k = original_top_k
-            self.retriever.chunk_retrieval.threshold = original_threshold
+        chunks = self.retriever.chunk_retrieval.retrieve(
+            query=query, 
+            top_k=top_k, 
+            threshold=threshold
+        )
+        return {
+            "chunks": chunks,
+            "total": len(chunks),
+            "search_type": "hybrid"
+        }
