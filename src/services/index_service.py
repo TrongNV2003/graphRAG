@@ -114,7 +114,15 @@ class GraphIndexing:
 
         entity_count = self.graph_db.query('MATCH (e:Entity) RETURN count(e) as count')[0]['count']
         rel_count = self.graph_db.query('MATCH ()-[r]->() RETURN count(r) as count')[0]['count']
-        chunk_count = self.graph_db.query('MATCH (c:Chunk) RETURN count(c) as count')[0]['count']
+        
+        try:
+            collection_info = self.qdrant_storage.vector_store.get_collection_info(
+                self.qdrant_storage.collection_name
+            )
+            chunk_count = collection_info.get("points_count", 0) if collection_info else 0
+        except Exception as e:
+            logger.warning(f"Failed to get chunk count from Qdrant: {e}")
+            chunk_count = 0
         
         logger.info(f"Database Statistics - Total Entities: {entity_count}, Total Relationships: {rel_count}, Total Chunks: {chunk_count}")
         

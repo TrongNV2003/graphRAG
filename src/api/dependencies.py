@@ -39,6 +39,11 @@ def get_qdrant_store() -> QdrantVectorStore:
     return create_qdrant_store()
 
 @lru_cache()
+def get_graph_storage() -> GraphStorage:
+    graph_db = get_neo4j_graph()
+    return GraphStorage(graph_db)
+
+@lru_cache()
 def get_indexing_service() -> GraphIndexing:
     client = get_openai_client()
     graph_db = get_neo4j_graph()
@@ -54,8 +59,8 @@ def get_indexing_service() -> GraphIndexing:
         prompt_template=EXTRACT_PROMPT_TEMPLATE,
         json_schema=EXTRACT_SCHEMA,
     )
+    storage = get_graph_storage()
     vector_store = get_qdrant_store()
-    storage = GraphStorage(graph_db)
     postprocessor = EntityPostprocessor()
     qdrant_storage = QdrantEmbedStorage(vector_store=vector_store)
     

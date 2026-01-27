@@ -32,7 +32,13 @@ async def index_wikipedia(
 
         entity_count = indexing_service.graph_db.query("MATCH (e:Entity) RETURN count(e) as count")[0]["count"]
         rel_count = indexing_service.graph_db.query("MATCH ()-[r]->() RETURN count(r) as count")[0]["count"]
-        chunk_count = indexing_service.graph_db.query("MATCH (c:Chunk) RETURN count(c) as count")[0]["count"]
+        try:
+            collection_info = indexing_service.qdrant_storage.vector_store.get_collection_info(
+                indexing_service.qdrant_storage.collection_name
+            )
+            chunk_count = collection_info.get("points_count", 0) if collection_info else 0
+        except Exception:
+            chunk_count = 0
 
         return IndexingResponse(
             status="success",

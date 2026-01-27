@@ -15,9 +15,8 @@ class GraphStorage:
     """
     def __init__(self, graph_db: Neo4jGraph):
         self.graph_db = graph_db
-        self.__setup_schema()
 
-    def __setup_schema(self):
+    def setup_schema(self):
         """Make sure necessary constraints and indexes exist in the database."""
         logger.info("Setting up database constraints")
         

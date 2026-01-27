@@ -1,19 +1,29 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
-from fastapi.responses import HTMLResponse
 from langchain_neo4j import Neo4jGraph
+from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 
-from src.api.dependencies import get_neo4j_graph
+from src.engines.qdrant import QdrantVectorStore
+from src.api.dependencies import get_neo4j_graph, get_qdrant_store
 from src.services.visualize_service import visualize_knowledge_graph
+from src.config.setting import qdrant_config
 
 router = APIRouter()
 
 @router.get("/stats")
-async def get_graph_stats(graph_db: Neo4jGraph = Depends(get_neo4j_graph)):
+async def get_graph_stats(
+    graph_db: Neo4jGraph = Depends(get_neo4j_graph),
+    qdrant_store: QdrantVectorStore = Depends(get_qdrant_store)
+):
     try:
         entity_count = graph_db.query("MATCH (e:Entity) RETURN count(e) as count")[0]["count"]
         rel_count = graph_db.query("MATCH ()-[r]->() RETURN count(r) as count")[0]["count"]
-        chunk_count = graph_db.query("MATCH (c:Chunk) RETURN count(c) as count")[0]["count"]
+        
+        try:
+            collection_info = qdrant_store.get_collection_info(qdrant_config.collection_name)
+            chunk_count = collection_info.get("points_count", 0) if collection_info else 0
+        except Exception:
+            chunk_count = 0
         
         return {
             "entities_count": entity_count,

@@ -1,6 +1,8 @@
-import json
+import warnings
 from loguru import logger
 from langchain_community.document_loaders import WikipediaLoader
+
+warnings.filterwarnings("ignore", message="No parser was explicitly specified")
 
 
 class DataLoader:

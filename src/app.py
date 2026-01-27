@@ -22,6 +22,17 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting HybridRAG")
     
+    try:
+        from src.api.dependencies import get_neo4j_graph
+        from src.core.storage import GraphStorage
+        
+        graph_db = get_neo4j_graph()
+        storage = GraphStorage(graph_db)
+        storage.setup_schema()
+        logger.info("Graph schema initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize graph schema on startup: {e}")
+        
     yield
     
     # Shutdown

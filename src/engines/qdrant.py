@@ -51,8 +51,6 @@ class QdrantVectorStore:
                         host=self._host,
                         port=self._port
                     )
-                
-                logger.info(f"Connected to Qdrant at {self._url or f'{self._host}:{self._port}'}")
             except ImportError:
                 raise ImportError("qdrant-client required. Install with: pip install qdrant-client")
         
@@ -367,11 +365,15 @@ class QdrantVectorStore:
         
         try:
             info = client.get_collection(collection_name=name)
+            
+            def get_attr(obj, attr, default=None):
+                return getattr(obj, attr, default)
+            
             return {
                 "name": name,
-                "vectors_count": info.vectors_count,
-                "points_count": info.points_count,
-                "status": info.status.value
+                "vectors_count": get_attr(info, "vectors_count", 0),
+                "points_count": get_attr(info, "points_count", 0),
+                "status": get_attr(info, "status").value if get_attr(info, "status") else "unknown"
             }
         except Exception as e:
             logger.error(f"Failed to get collection info for '{name}': {e}")

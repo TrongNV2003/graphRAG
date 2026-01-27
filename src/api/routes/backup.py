@@ -1,18 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
-from langchain_neo4j import Neo4jGraph
-import tempfile
 import os
+import tempfile
+from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 
-from src.api.dependencies import get_neo4j_graph
 from src.core.storage import GraphStorage
+from src.api.dependencies import get_graph_storage
 
 router = APIRouter()
 
 
 @router.get("/backup")
 async def backup_graph(
-    graph_db: Neo4jGraph = Depends(get_neo4j_graph),
+    storage: GraphStorage = Depends(get_graph_storage),
 ):
     """
     Backup the entire graph to a ZIP file containing CSVs.
@@ -23,8 +22,6 @@ async def backup_graph(
     - metadata.json
     """
     try:
-        storage = GraphStorage(graph_db)
-        
         temp_dir = tempfile.mkdtemp()
         backup_path = os.path.join(temp_dir, "graph_backup.zip")
         
@@ -47,7 +44,7 @@ async def backup_graph(
 async def restore_graph(
     file: UploadFile = File(...),
     clear_existing: bool = True,
-    graph_db: Neo4jGraph = Depends(get_neo4j_graph),
+    storage: GraphStorage = Depends(get_graph_storage),
 ):
     """
     Restore graph from a backup ZIP file.
@@ -63,9 +60,6 @@ async def restore_graph(
         raise HTTPException(status_code=400, detail="File must be a ZIP archive")
     
     try:
-        storage = GraphStorage(graph_db)
-        
-        # Save uploaded file to temp location
         temp_dir = tempfile.mkdtemp()
         temp_path = os.path.join(temp_dir, "uploaded_backup.zip")
         
